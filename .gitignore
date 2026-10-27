@@ -1,0 +1,13 @@
+# Logs and runtime artifacts
+*.log
+__pycache__/
+*.pyc
+dist/
+obj/
+CodesysMcp/bin/
+CodesysMcp/obj/
+CodesysMcpCli/bin/
+CodesysMcpCli/obj/
+.vs/
+*.user
+*.suo
