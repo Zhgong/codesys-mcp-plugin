@@ -1,65 +1,111 @@
 # CODESYS Native C# Stdio MCP Plugin (`codesys-mcp-plugin`)
 
-本项目通过 **C# / .NET 进程内原生组件 (`CodesysMcp.dll`) + 纯 Stdio 命令行桥接器 (`CodesysMcpCli.exe`)**，为 CODESYS V3.5 提供零 HTTP 端口、零磁盘文件轮询的原生 **MCP (Model Context Protocol)** 服务。
+**English** | [中文](README_zh.md)
 
 ---
 
-## 📁 目录结构
+A high-performance, in-process **Model Context Protocol (MCP)** server for **CODESYS V3.5**, powered by native **C# / .NET** (`CodesysMcp.dll`) and a lightweight **Stdio bridge** (`CodesysMcpCli.exe`).
+
+Enables AI coding assistants (such as **Claude Desktop**, **Cursor**, **Windsurf**, and **Antigravity**) to inspect, edit, compile, and manage CODESYS PLC projects directly with **zero HTTP ports**, **zero network configuration**, and **zero disk file polling**.
+
+---
+
+## 🚀 Key Advantages
+
+```mermaid
+flowchart LR
+    subgraph Client["AI Client (Stdio)"]
+        AI["Claude Desktop / Cursor"]
+    end
+
+    subgraph Bridge["Lightweight CLI Proxy"]
+        CLI["CodesysMcpCli.exe\n(stdin / stdout)"]
+    end
+
+    subgraph CODESYS["CODESYS Process (In-Memory)"]
+        Pipe["Named Pipe\n\\\\.\\pipe\\codesys_mcp_pipe"]
+        Core["CodesysMcp.dll\n(In-Process C# MCP Server)"]
+        UI["UI Thread Dispatch\n(SynchronizationContext)"]
+        Engine["CODESYS ScriptEngine\n(Projects, POUs, Compiler)"]
+        
+        Pipe --> Core
+        Core --> UI
+        UI --> Engine
+    end
+
+    AI <-->|Stdio JSON-RPC 2.0| CLI
+    CLI <-->|Fast Windows Pipe Stream| Pipe
+```
+
+1. **Pure Stdio (Zero Network Ports)**:
+   - Communicates standard input/output (`stdin`/`stdout`) through `CodesysMcpCli.exe` to a local Windows Named Pipe (`\\.\pipe\codesys_mcp_pipe`).
+   - No firewall alerts, no port collisions, and no token/IP exposure.
+2. **True In-Process Performance**:
+   - Replaces traditional disk polling (`requests/*.json` <-> `results/*.json`) with direct in-memory calls.
+   - Response latency drops from hundreds of milliseconds to **single-digit milliseconds**.
+3. **CODESYS IDE (GUI) & Thread Safety**:
+   - Integrates with the CODESYS IDE UI message loop via `SynchronizationContext.Send()`.
+   - Modifying POUs or triggering builds from background threads will never crash or freeze the IDE interface.
+4. **No 3S Digital Signature Required**:
+   - Bypasses strict third-party `.package` certificate requirements by using CLR native assembly loading inside CODESYS ScriptEngine.
+
+---
+
+## 📁 Repository Layout
 
 ```text
 codesys-mcp-plugin/
 ├── bin/Release/
-│   ├── CodesysMcp.dll              # 注入 CODESYS 进程内部的 C# 核心服务程序集
-│   └── CodesysMcpCli.exe           # 纯 Stdio 协议桥接器（供 Claude / Cursor / AI 客户端直接调用）
-├── CodesysMcp/                     # C# 进程内插件源码
-│   ├── CodesysContext.cs           # CODESYS 上下文与 UI 主线程安全调度 (SynchronizationContext)
-│   ├── CodesysOperations.cs        # 工程、POU、编译操作封装（基于 IExtendedObject.Extensions 强类型接口）
-│   ├── McpServer.cs                # Windows 命名管道 (\\.\pipe\codesys_mcp_pipe) JSON-RPC 2.0 服务端
-│   └── ServerBootstrap.cs          # 供 IronPython 调用的静态启动入口
+│   ├── CodesysMcp.dll              # In-process C# MCP server loaded by CODESYS CLR
+│   └── CodesysMcpCli.exe           # Pure Stdio bridge executable for AI clients
+├── CodesysMcp/                     # C# native plugin source code
+│   ├── CodesysContext.cs           # CODESYS context & UI thread synchronization
+│   ├── CodesysOperations.cs        # Project, POU, and compiler APIs via IExtendedObject.Extensions
+│   ├── McpServer.cs                # Named Pipe JSON-RPC 2.0 protocol engine
+│   └── ServerBootstrap.cs          # Entry point called by IronPython bootstrap
 ├── CodesysMcpCli/
-│   └── Program.cs                  # 标准输入输出 (stdin/stdout) 到命名管道的无缓冲转发器
-├── codesys_mcp_session.py          # CODESYS 启动挂载脚本（自动识别 GUI IDE 模式与无头 --noUI 模式）
-├── start_codesys_ide_with_mcp.bat  # 一键启动 CODESYS IDE (带界面) 并自动挂载 MCP 插件
-├── run_codesys_mcp.ps1             # PowerShell 启动器（支持 GUI IDE 模式与 -NoUI 后台模式）
-├── launch_mcp.py                   # 后台无头模式守护启动脚本（带命名管道就绪探测）
-├── build.ps1                       # Roslyn 一键编译脚本
-└── test_cli_stdio.py               # 纯 Stdio 全链路自动化回归测试脚本
+│   └── Program.cs                  # High-throughput stdin/stdout pipe forwarder
+├── codesys_mcp_session.py          # Session bootstrapper (auto-detects GUI IDE vs --noUI mode)
+├── start_codesys_ide_with_mcp.bat  # 1-Click launcher for CODESYS IDE with auto-attached MCP
+├── run_codesys_mcp.ps1             # PowerShell runner supporting both GUI and Headless modes
+├── launch_mcp.py                   # Python daemon launcher for headless environments
+├── build.ps1                       # Automated Roslyn C# build script
+├── package_release.ps1             # 1-Click release packaging script
+└── test_cli_stdio.py               # End-to-end Stdio MCP regression test suite
 ```
 
 ---
 
-## 🖥️ 如何安装与挂载到 CODESYS IDE 里面？
+## 🖥️ Installation & IDE Usage
 
-CODESYS 的第三方原生插件如果走官方 `.package` 方式，需要向 3S-Smart Software Solutions 申请商业插件签名证书（否则会被 `ComponentManager` 拦截）。本项目采用 **CLR 原生注入 (`clr.AddReferenceToFileAndPath`) + 后台命名管道线程 + UI `SynchronizationContext` 线程安全派发** 方案，无需签名即可在 CODESYS IDE 内部原生运行。
+You have **three seamless ways** to attach the MCP server to the CODESYS IDE:
 
-你有 **3 种方式** 将其安装/挂载到 **CODESYS IDE** 中：
-
-### 方式一：一键启动带插件的 CODESYS IDE（推荐，最省心）
-直接双击运行本目录下的 [`start_codesys_ide_with_mcp.bat`](file:///C:/Users/vboxuser/Desktop/Repos/codesys-mcp-plugin/start_codesys_ide_with_mcp.bat)，或修改你桌面上的 CODESYS 快捷方式“目标(Target)”为：
+### Method 1: Launch CODESYS IDE with MCP Attached (Recommended)
+Double-click [`start_codesys_ide_with_mcp.bat`](start_codesys_ide_with_mcp.bat), or edit your existing CODESYS desktop shortcut Target to:
 ```cmd
 "C:\Program Files\CODESYS 3.5.20.50\CODESYS\Common\CODESYS.exe" --profile="CODESYS V3.5 SP20 Patch 5" --runscript="C:\Users\vboxuser\Desktop\Repos\codesys-mcp-plugin\codesys_mcp_session.py"
 ```
-- **效果**：CODESYS IDE 正常打开图形界面，启动完成后自动将 `CodesysMcp.dll` 挂载到 IDE 后台，并在底部的“消息(Messages)”窗口输出：
+- **What happens**: CODESYS IDE starts normally with full graphical UI. During startup, `CodesysMcp.dll` is loaded into memory, activates `\\.\pipe\codesys_mcp_pipe`, and finishes foreground script execution immediately.
+- The IDE message view will display:
   `[CODESYS MCP] Native Stdio/Pipe MCP Server started on \\.\pipe\codesys_mcp_pipe`
-- 挂载脚本识别到 `system.ui_present == True` 后会**立即退出脚本前台占用**，C# 命名管道服务在 IDE 后台线程持续监听，**完全不阻塞你在 IDE 中的任何正常操作**。
+- You can work in the IDE as usual while AI tools read and edit code in real-time.
 
-### 方式二：在已打开的 CODESYS IDE 中手动加载
-如果你已经打开了 CODESYS IDE 正在编写工程，无需重启 IDE：
-1. 在 CODESYS 顶部菜单栏点击 **`Tools` (工具) -> `Scripting` (脚本) -> `Execute Script File...` (执行脚本文件...)**。
-2. 选择 `C:\Users\vboxuser\Desktop\Repos\codesys-mcp-plugin\codesys_mcp_session.py`。
-3. 后台命名管道立即激活，AI 客户端即可实时读写你当前在 IDE 中打开的工程。
+### Method 2: Load into an Already Running CODESYS IDE
+If you already have a CODESYS project open:
+1. In the CODESYS top menu, select **`Tools` -> `Scripting` -> `Execute Script File...`**.
+2. Select `C:\Users\vboxuser\Desktop\Repos\codesys-mcp-plugin\codesys_mcp_session.py`.
+3. The server is immediately active in the background.
 
-### 方式三：固定到 CODESYS IDE 顶部工具栏 / 脚本目录（做成 IDE 按钮）
-如果你想在 CODESYS IDE 界面里拥有一个专属启动按钮：
-1. 打开 CODESYS IDE，点击菜单 **`Tools` (工具) -> `Customize...` (自定义...)**。
-2. 切换到 **`Toolbars` (工具栏)** 或 **`Menu` (菜单)** 选项卡，启用 **`Scripting` (脚本)** 工具栏，或者添加 **`Execute Script File`** 命令按钮并指向 `codesys_mcp_session.py`。
-3. 之后在 IDE 工具栏点一下图标即可启动 MCP 服务。
+### Method 3: Add a Custom Button to CODESYS Toolbar
+1. In CODESYS, open **`Tools` -> `Customize...`**.
+2. Go to the **`Toolbars`** or **`Menu`** tab.
+3. Enable the **`Scripting`** toolbar or add a custom command pointing to `codesys_mcp_session.py`.
 
 ---
 
-## 🔌 配置 AI 客户端（纯 Stdio 模式，无需任何 HTTP Server）
+## 🔌 Client Configuration (Claude Desktop / Cursor / Windsurf)
 
-无论你使用的是 **Claude Desktop**、**Cursor**、**Windsurf** 还是其他 MCP 客户端，全部统一通过 **Stdio** 调用 `CodesysMcpCli.exe`，无需开启任何端口：
+Add the following to your MCP client configuration (e.g., `claude_desktop_config.json` or `.cursor/mcp.json`):
 
 ```json
 {
@@ -74,36 +120,45 @@ CODESYS 的第三方原生插件如果走官方 `.package` 方式，需要向 3S
 
 ---
 
-## 🛠️ 支持的 MCP 工具列表 (`tools/list`)
+## 🛠️ Supported MCP Tools (`tools/list`)
 
-| 工具名称 | 参数说明 | 功能描述 |
+| Tool Name | Arguments | Description |
 | :--- | :--- | :--- |
-| `get_project_info` | 无 | 获取当前打开工程的名称、路径、修改状态 (`isDirty`)、活动应用名称 |
-| `open_project` | `path: string` | 在 CODESYS 中打开指定的 `.project` 工程文件 |
-| `close_project` | 无 | 关闭当前打开的工程 |
-| `save_project` | 无 | 保存当前打开的工程 |
-| `get_project_tree` | `full?: bool` | 递归获取工程对象树（所有设备、应用、POU、GVL、任务及是否有声明/实现代码） |
-| `read_pou` | `name: string` | 读取指定 POU 的声明区 (`VAR...END_VAR`) 和实现区 (`ST` 代码) |
-| `write_pou` | `name`, `declaration`, `implementation`, `type` | 创建新 POU 或更新已有 POU 的声明区和实现区代码（支持 `Program`、`FunctionBlock`、`Function`） |
-| `delete_pou` | `name: string` | 从工程中删除指定的 POU 对象 |
-| `compile_project` | `clean?: bool`, `rebuild?: bool` | 编译当前工程并直接返回所有编译报错、警告明细 |
-| `get_compiler_messages` | 无 | 不重新触发编译，直接读取当前编译器消息列表 |
+| `get_project_info` | None | Returns active project name, file path, dirty status (`isDirty`), and active application. |
+| `open_project` | `path: string` | Opens an existing `.project` file in CODESYS. |
+| `close_project` | None | Closes the currently active project. |
+| `save_project` | None | Saves all modifications in the current project. |
+| `get_project_tree` | `full?: bool` | Recursively retrieves the project tree (POUs, GVLs, DUTs, devices, tasks). |
+| `read_pou` | `name: string` | Reads the declaration (`VAR...END_VAR`) and implementation (`ST`) of a POU. |
+| `write_pou` | `name`, `declaration`, `implementation`, `type` | Creates or updates a POU (`Program`, `FunctionBlock`, or `Function`). |
+| `delete_pou` | `name: string` | Deletes a POU or object from the project. |
+| `compile_project` | `clean?: bool`, `rebuild?: bool` | Triggers project compilation and returns structured error/warning messages. |
+| `get_compiler_messages` | None | Retrieves compiler errors and warnings without triggering a rebuild. |
 
 ---
 
-## 🧪 编译与自测命令
+## 🧪 Building & Verification
 
-1. **重新编译 C# 插件与 Stdio CLI**：
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File C:\Users\vboxuser\Desktop\Repos\codesys-mcp-plugin\build.ps1
-   ```
+### Build from Source
+Compile both `CodesysMcp.dll` and `CodesysMcpCli.exe` with the system Roslyn compiler:
+```powershell
+powershell -ExecutionPolicy Bypass -File build.ps1
+```
 
-2. **运行无头模式后台守护进程（若未打开 IDE）**：
-   ```powershell
-   python C:\Users\vboxuser\Desktop\Repos\codesys-mcp-plugin\launch_mcp.py
-   ```
+### Run End-to-End Stdio Test
+While CODESYS is running (either via IDE or headless), run the automated test:
+```powershell
+python test_cli_stdio.py
+```
 
-3. **运行纯 Stdio 全流程测试（模拟 AI 客户端通过 stdin/stdout 读写 POU 并编译）**：
-   ```powershell
-   python C:\Users\vboxuser\Desktop\Repos\codesys-mcp-plugin\test_cli_stdio.py
-   ```
+### Create Release Package
+Generate a distributable zip archive in `dist/`:
+```powershell
+powershell -ExecutionPolicy Bypass -File package_release.ps1
+```
+
+---
+
+## 📄 License
+
+MIT License. See [LICENSE](LICENSE) for details.
