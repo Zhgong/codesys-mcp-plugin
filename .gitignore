@@ -8,6 +8,7 @@ CodesysMcp/bin/
 CodesysMcp/obj/
 CodesysMcpCli/bin/
 CodesysMcpCli/obj/
+*Tests.exe
 .vs/
 *.user
 *.suo

@@ -14,7 +14,7 @@ namespace CodesysMcpCli
 {
     class Program
     {
-        private const string PipeName = "codesys_mcp_pipe";
+        public const string DefaultPipeName = "codesys_mcp_pipe";
 
         public static string ReadLineFromPipe(Stream stream)
         {
@@ -44,11 +44,14 @@ namespace CodesysMcpCli
                 return 0;
             }
 
+            string pipeName = ResolvePipeName(args);
+            int maxAttempts = ResolveMaxAttempts(args);
+
             // Auto-detect or connect to CODESYS Named Pipe
-            NamedPipeClientStream pipeClient = ConnectToCodesysPipe();
+            NamedPipeClientStream pipeClient = ConnectToCodesysPipe(pipeName, maxAttempts);
             if (pipeClient == null)
             {
-                Console.Error.WriteLine("[CodesysMcpCli] Error: Could not connect to CODESYS pipe: " + PipeName);
+                Console.Error.WriteLine("[CodesysMcpCli] Error: Could not connect to CODESYS pipe: " + pipeName);
                 return 1;
             }
 
@@ -83,19 +86,63 @@ namespace CodesysMcpCli
             return 0;
         }
 
-        private static NamedPipeClientStream ConnectToCodesysPipe()
+        private static string ResolvePipeName(string[] args)
         {
-            for (int attempt = 1; attempt <= 15; attempt++)
+            if (args != null)
+            {
+                for (int i = 0; i < args.Length - 1; i++)
+                {
+                    if (args[i] == "--pipe" || args[i] == "-p")
+                    {
+                        return args[i + 1];
+                    }
+                }
+            }
+
+            string env = Environment.GetEnvironmentVariable("CODESYS_MCP_PIPE");
+            if (!string.IsNullOrEmpty(env))
+            {
+                return env.Trim();
+            }
+
+            return DefaultPipeName;
+        }
+
+        private static int ResolveMaxAttempts(string[] args)
+        {
+            if (args != null)
+            {
+                for (int i = 0; i < args.Length - 1; i++)
+                {
+                    if (args[i] == "--attempts" || args[i] == "-a")
+                    {
+                        int val;
+                        if (int.TryParse(args[i + 1], out val) && val > 0)
+                        {
+                            return val;
+                        }
+                    }
+                }
+            }
+            return 15;
+        }
+
+        private static NamedPipeClientStream ConnectToCodesysPipe(string pipeName, int maxAttempts = 15)
+        {
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 try
                 {
-                    var client = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut);
+                    var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
                     client.Connect(1000);
                     return client;
                 }
                 catch
                 {
-                    Thread.Sleep(500);
+                    if (attempt < maxAttempts)
+                    {
+                        Thread.Sleep(500);
+                    }
                 }
             }
             return null;

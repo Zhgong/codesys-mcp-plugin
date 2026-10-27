@@ -146,7 +146,17 @@ codesys-mcp-plugin/
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-### 运行全流程 Stdio 回归测试
+### 运行自动化单元测试与集成测试
+一键运行全量测试集（C# 核心单元测试 + Python 协议集成测试）：
+```powershell
+powershell -ExecutionPolicy Bypass -File run_tests.ps1
+```
+如需在 CODESYS IDE 运行时附加全量 E2E 真实环境测试：
+```powershell
+powershell -ExecutionPolicy Bypass -File run_tests.ps1 -IncludeE2E
+```
+
+### 运行手动 Stdio 演示脚本
 在 CODESYS 运行状态下（无论是 IDE 模式还是后台无头模式），运行自动化测试：
 ```powershell
 python test_cli_stdio.py

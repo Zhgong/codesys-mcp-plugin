@@ -145,7 +145,17 @@ Compile both `CodesysMcp.dll` and `CodesysMcpCli.exe` with the system Roslyn com
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-### Run End-to-End Stdio Test
+### Run Automated Unit & Integration Tests
+Run the entire test suite (C# Core Unit Tests + Python Protocol Tests):
+```powershell
+powershell -ExecutionPolicy Bypass -File run_tests.ps1
+```
+To additionally include live CODESYS E2E tests against an active IDE:
+```powershell
+powershell -ExecutionPolicy Bypass -File run_tests.ps1 -IncludeE2E
+```
+
+### Run Manual Stdio Demonstration
 While CODESYS is running (either via IDE or headless), run the automated test:
 ```powershell
 python test_cli_stdio.py

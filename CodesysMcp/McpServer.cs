@@ -74,7 +74,7 @@ namespace CodesysMcp
             }
         }
 
-        private static string ReadLineFromPipe(Stream stream)
+        public static string ReadLineFromPipe(Stream stream)
         {
             var bytes = new List<byte>();
             int b;
@@ -87,7 +87,7 @@ namespace CodesysMcp
             return Encoding.UTF8.GetString(bytes.ToArray());
         }
 
-        private static void WriteLineToPipe(Stream stream, string text)
+        public static void WriteLineToPipe(Stream stream, string text)
         {
             byte[] bytes = Encoding.UTF8.GetBytes(text + "\n");
             stream.Write(bytes, 0, bytes.Length);
