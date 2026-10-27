@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the `codesys-plugin` (CODESYS Native C# Stdio MCP Server) project will be documented in this file.
+All notable changes to the `codesys-mcp-plugin` (CODESYS Native C# Stdio MCP Server) project will be documented in this file.
 
 ## [1.1.0] - 2026-10-27
 

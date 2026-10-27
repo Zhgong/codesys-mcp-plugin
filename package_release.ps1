@@ -3,8 +3,8 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $version = (Get-Content (Join-Path $Root "VERSION") -Raw).Trim()
 $distDir = Join-Path $Root "dist"
-$stageDir = Join-Path $distDir "codesys-plugin-v$version"
-$zipFile = Join-Path $distDir "codesys-plugin-v$version.zip"
+$stageDir = Join-Path $distDir "codesys-mcp-plugin-v$version"
+$zipFile = Join-Path $distDir "codesys-mcp-plugin-v$version.zip"
 
 # Ensure latest build
 & (Join-Path $Root "build.ps1")

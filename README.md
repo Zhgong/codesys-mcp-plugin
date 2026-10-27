@@ -1,4 +1,4 @@
-# CODESYS Native C# Stdio MCP Plugin (`codesys-plugin`)
+# CODESYS Native C# Stdio MCP Plugin (`codesys-mcp-plugin`)
 
 本项目通过 **C# / .NET 进程内原生组件 (`CodesysMcp.dll`) + 纯 Stdio 命令行桥接器 (`CodesysMcpCli.exe`)**，为 CODESYS V3.5 提供零 HTTP 端口、零磁盘文件轮询的原生 **MCP (Model Context Protocol)** 服务。
 
@@ -7,7 +7,7 @@
 ## 📁 目录结构
 
 ```text
-codesys-plugin/
+codesys-mcp-plugin/
 ├── bin/Release/
 │   ├── CodesysMcp.dll              # 注入 CODESYS 进程内部的 C# 核心服务程序集
 │   └── CodesysMcpCli.exe           # 纯 Stdio 协议桥接器（供 Claude / Cursor / AI 客户端直接调用）
@@ -35,9 +35,9 @@ CODESYS 的第三方原生插件如果走官方 `.package` 方式，需要向 3S
 你有 **3 种方式** 将其安装/挂载到 **CODESYS IDE** 中：
 
 ### 方式一：一键启动带插件的 CODESYS IDE（推荐，最省心）
-直接双击运行本目录下的 [`start_codesys_ide_with_mcp.bat`](file:///C:/Users/vboxuser/Desktop/Repos/codesys-plugin/start_codesys_ide_with_mcp.bat)，或修改你桌面上的 CODESYS 快捷方式“目标(Target)”为：
+直接双击运行本目录下的 [`start_codesys_ide_with_mcp.bat`](file:///C:/Users/vboxuser/Desktop/Repos/codesys-mcp-plugin/start_codesys_ide_with_mcp.bat)，或修改你桌面上的 CODESYS 快捷方式“目标(Target)”为：
 ```cmd
-"C:\Program Files\CODESYS 3.5.20.50\CODESYS\Common\CODESYS.exe" --profile="CODESYS V3.5 SP20 Patch 5" --runscript="C:\Users\vboxuser\Desktop\Repos\codesys-plugin\codesys_mcp_session.py"
+"C:\Program Files\CODESYS 3.5.20.50\CODESYS\Common\CODESYS.exe" --profile="CODESYS V3.5 SP20 Patch 5" --runscript="C:\Users\vboxuser\Desktop\Repos\codesys-mcp-plugin\codesys_mcp_session.py"
 ```
 - **效果**：CODESYS IDE 正常打开图形界面，启动完成后自动将 `CodesysMcp.dll` 挂载到 IDE 后台，并在底部的“消息(Messages)”窗口输出：
   `[CODESYS MCP] Native Stdio/Pipe MCP Server started on \\.\pipe\codesys_mcp_pipe`
@@ -46,7 +46,7 @@ CODESYS 的第三方原生插件如果走官方 `.package` 方式，需要向 3S
 ### 方式二：在已打开的 CODESYS IDE 中手动加载
 如果你已经打开了 CODESYS IDE 正在编写工程，无需重启 IDE：
 1. 在 CODESYS 顶部菜单栏点击 **`Tools` (工具) -> `Scripting` (脚本) -> `Execute Script File...` (执行脚本文件...)**。
-2. 选择 `C:\Users\vboxuser\Desktop\Repos\codesys-plugin\codesys_mcp_session.py`。
+2. 选择 `C:\Users\vboxuser\Desktop\Repos\codesys-mcp-plugin\codesys_mcp_session.py`。
 3. 后台命名管道立即激活，AI 客户端即可实时读写你当前在 IDE 中打开的工程。
 
 ### 方式三：固定到 CODESYS IDE 顶部工具栏 / 脚本目录（做成 IDE 按钮）
@@ -65,7 +65,7 @@ CODESYS 的第三方原生插件如果走官方 `.package` 方式，需要向 3S
 {
   "mcpServers": {
     "codesys": {
-      "command": "C:\\Users\\vboxuser\\Desktop\\Repos\\codesys-plugin\\bin\\Release\\CodesysMcpCli.exe",
+      "command": "C:\\Users\\vboxuser\\Desktop\\Repos\\codesys-mcp-plugin\\bin\\Release\\CodesysMcpCli.exe",
       "args": []
     }
   }
@@ -95,15 +95,15 @@ CODESYS 的第三方原生插件如果走官方 `.package` 方式，需要向 3S
 
 1. **重新编译 C# 插件与 Stdio CLI**：
    ```powershell
-   powershell -ExecutionPolicy Bypass -File C:\Users\vboxuser\Desktop\Repos\codesys-plugin\build.ps1
+   powershell -ExecutionPolicy Bypass -File C:\Users\vboxuser\Desktop\Repos\codesys-mcp-plugin\build.ps1
    ```
 
 2. **运行无头模式后台守护进程（若未打开 IDE）**：
    ```powershell
-   python C:\Users\vboxuser\Desktop\Repos\codesys-plugin\launch_mcp.py
+   python C:\Users\vboxuser\Desktop\Repos\codesys-mcp-plugin\launch_mcp.py
    ```
 
 3. **运行纯 Stdio 全流程测试（模拟 AI 客户端通过 stdin/stdout 读写 POU 并编译）**：
    ```powershell
-   python C:\Users\vboxuser\Desktop\Repos\codesys-plugin\test_cli_stdio.py
+   python C:\Users\vboxuser\Desktop\Repos\codesys-mcp-plugin\test_cli_stdio.py
    ```
