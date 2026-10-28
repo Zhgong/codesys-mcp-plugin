@@ -135,6 +135,7 @@ codesys-mcp-plugin/
 | `delete_pou` | `name: string` | 从工程中删除指定的 POU 对象 |
 | `compile_project` | `clean?: bool`, `rebuild?: bool` | 编译当前工程并直接返回所有编译报错、警告明细 |
 | `get_compiler_messages` | 无 | 不重新触发编译，直接读取当前编译器消息列表 |
+| `search_code` | `query: string`, `is_regex?: bool`, `case_sensitive?: bool`, `scope?: string`, `max_results?: int` | 跨 POU、GVL、DUT 全局搜索普通文本或正则表达式，精准返回 1-based 行号及上下文 |
 
 ---
 

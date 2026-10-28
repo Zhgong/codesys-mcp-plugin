@@ -2,11 +2,33 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using _3S.CoDeSys.ScriptEngine;
 using _3S.CoDeSys.ScriptEngine.BasicFunctionality;
 
 namespace CodesysMcp
 {
+    public class SearchMatchItem
+    {
+        public string objectName { get; set; }
+        public string objectType { get; set; }
+        public string section { get; set; } // "declaration" or "implementation"
+        public int lineNumber { get; set; }
+        public string lineContent { get; set; }
+        public string matchedText { get; set; }
+    }
+
+    public class SearchCodeResult
+    {
+        public string query { get; set; }
+        public bool isRegex { get; set; }
+        public bool caseSensitive { get; set; }
+        public string scope { get; set; }
+        public int totalMatches { get; set; }
+        public bool truncated { get; set; }
+        public List<SearchMatchItem> matches { get; set; } = new List<SearchMatchItem>();
+    }
+
     public class ProjectInfoResult
     {
         public bool isOpen { get; set; }
@@ -448,6 +470,204 @@ namespace CodesysMcp
                 res.success = res.errorCount == 0;
                 return res;
             });
+        }
+
+        public static List<SearchMatchItem> SearchInText(
+            string text,
+            string objName,
+            string objType,
+            string section,
+            Regex regex,
+            int maxSlots)
+        {
+            var list = new List<SearchMatchItem>();
+            if (string.IsNullOrEmpty(text) || regex == null || maxSlots <= 0)
+                return list;
+
+            using (var reader = new StringReader(text))
+            {
+                string line;
+                int lineNum = 1;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    var match = regex.Match(line);
+                    if (match.Success)
+                    {
+                        list.Add(new SearchMatchItem
+                        {
+                            objectName = objName,
+                            objectType = objType,
+                            section = section,
+                            lineNumber = lineNum,
+                            lineContent = line,
+                            matchedText = match.Value
+                        });
+
+                        if (list.Count >= maxSlots)
+                            break;
+                    }
+                    lineNum++;
+                }
+            }
+            return list;
+        }
+
+        public static SearchCodeResult SearchCode(
+            string query,
+            bool isRegex = false,
+            bool caseSensitive = false,
+            string scope = "all",
+            int maxResults = 100)
+        {
+            if (string.IsNullOrEmpty(query))
+                throw new ArgumentException("Parameter 'query' cannot be empty.");
+
+            if (maxResults <= 0) maxResults = 100;
+            if (string.IsNullOrEmpty(scope)) scope = "all";
+
+            RegexOptions options = RegexOptions.None;
+            if (!caseSensitive)
+            {
+                options |= RegexOptions.IgnoreCase;
+            }
+
+            string pattern = isRegex ? query : Regex.Escape(query);
+            Regex regex = new Regex(pattern, options);
+
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var proj = CodesysContext.PrimaryProject;
+                var res = new SearchCodeResult
+                {
+                    query = query,
+                    isRegex = isRegex,
+                    caseSensitive = caseSensitive,
+                    scope = scope,
+                    matches = new List<SearchMatchItem>()
+                };
+
+                if (proj == null) return res;
+
+                var treeObj = proj as IScriptTreeObject ?? GetExtension<IScriptTreeObject>(CodesysContext.PrimaryProjectExtended);
+                if (treeObj == null) return res;
+
+                var allObjects = new List<IExtendedObject<IScriptObject>>();
+                CollectTextualObjects(treeObj, allObjects);
+
+                foreach (var extObj in allObjects)
+                {
+                    if (res.matches.Count >= maxResults)
+                    {
+                        res.truncated = true;
+                        break;
+                    }
+
+                    var baseObj = extObj.BaseObject;
+                    string objName = baseObj.get_name();
+                    string friendlyType = DetermineFriendlyType(baseObj);
+
+                    if (!MatchesScope(friendlyType, scope))
+                        continue;
+
+                    var marker = GetExtension<IScriptTextualObjectMarker>(extObj);
+                    if (marker == null) continue;
+
+                    // 1. Search declaration
+                    if (marker.has_textual_declaration)
+                    {
+                        var declExt = GetExtension<IScriptObjectWithTextualDeclaration>(extObj);
+                        var doc = declExt?.textual_declaration;
+                        if (doc != null && !string.IsNullOrEmpty(doc.text))
+                        {
+                            int remaining = maxResults - res.matches.Count;
+                            var declMatches = SearchInText(doc.text, objName, friendlyType, "declaration", regex, remaining);
+                            res.matches.AddRange(declMatches);
+                        }
+                    }
+
+                    if (res.matches.Count >= maxResults)
+                    {
+                        res.truncated = true;
+                        break;
+                    }
+
+                    // 2. Search implementation
+                    if (marker.has_textual_implementation)
+                    {
+                        var implExt = GetExtension<IScriptObjectWithTextualImplementation>(extObj);
+                        var doc = implExt?.textual_implementation;
+                        if (doc != null && !string.IsNullOrEmpty(doc.text))
+                        {
+                            int remaining = maxResults - res.matches.Count;
+                            var implMatches = SearchInText(doc.text, objName, friendlyType, "implementation", regex, remaining);
+                            res.matches.AddRange(implMatches);
+                        }
+                    }
+                }
+
+                res.totalMatches = res.matches.Count;
+                if (res.matches.Count >= maxResults)
+                {
+                    res.truncated = true;
+                }
+                return res;
+            });
+        }
+
+        private static void CollectTextualObjects(IScriptTreeObject root, List<IExtendedObject<IScriptObject>> result)
+        {
+            if (root == null) return;
+            var children = root.get_children(false);
+            if (children == null) return;
+
+            foreach (var child in children)
+            {
+                var marker = GetExtension<IScriptTextualObjectMarker>(child);
+                if (marker != null && (marker.has_textual_declaration || marker.has_textual_implementation))
+                {
+                    result.Add(child);
+                }
+
+                var treeChild = child.BaseObject as IScriptTreeObject ?? GetExtension<IScriptTreeObject>(child);
+                if (treeChild != null)
+                {
+                    CollectTextualObjects(treeChild, result);
+                }
+            }
+        }
+
+        private static string DetermineFriendlyType(IScriptObject baseObj)
+        {
+            if (baseObj == null) return "Unknown";
+            string typeStr = baseObj.type.ToString();
+            if (typeStr.IndexOf("6f9dac99", StringComparison.OrdinalIgnoreCase) >= 0) return "POU";
+            if (typeStr.IndexOf("225bfe47", StringComparison.OrdinalIgnoreCase) >= 0) return "GVL";
+            if (typeStr.IndexOf("2db5746d", StringComparison.OrdinalIgnoreCase) >= 0) return "DUT";
+            return typeStr;
+        }
+
+        private static bool MatchesScope(string friendlyType, string scope)
+        {
+            if (string.IsNullOrEmpty(scope) || scope.Equals("all", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            string s = scope.ToLowerInvariant();
+            string t = friendlyType.ToLowerInvariant();
+
+            if (s.Contains("pou"))
+            {
+                return t.Contains("pou") || t.Contains("program") || t.Contains("function");
+            }
+            if (s.Contains("gvl"))
+            {
+                return t.Contains("gvl") || t.Contains("global");
+            }
+            if (s.Contains("dut"))
+            {
+                return t.Contains("dut") || t.Contains("type") || t.Contains("struct") || t.Contains("enum");
+            }
+
+            return true;
         }
 
         public static bool SaveProject()

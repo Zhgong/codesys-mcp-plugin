@@ -72,7 +72,8 @@ namespace CodesysMcpTests
             {
                 typeof(ProtocolTests),
                 typeof(ToolValidationTests),
-                typeof(StreamFramingTests)
+                typeof(StreamFramingTests),
+                typeof(SearchEngineTests)
             };
 
             int passed = 0;

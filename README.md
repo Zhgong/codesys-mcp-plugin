@@ -134,6 +134,7 @@ Add the following to your MCP client configuration (e.g., `claude_desktop_config
 | `delete_pou` | `name: string` | Deletes a POU or object from the project. |
 | `compile_project` | `clean?: bool`, `rebuild?: bool` | Triggers project compilation and returns structured error/warning messages. |
 | `get_compiler_messages` | None | Retrieves compiler errors and warnings without triggering a rebuild. |
+| `search_code` | `query: string`, `is_regex?: bool`, `case_sensitive?: bool`, `scope?: string`, `max_results?: int` | Searches plain text or regex across all POUs, GVLs, and DUTs with exact line numbers and context. |
 
 ---
 

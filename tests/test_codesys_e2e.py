@@ -77,6 +77,7 @@ class TestCodesysLiveE2E(unittest.TestCase):
         self.assertIn("read_pou", tool_names)
         self.assertIn("write_pou", tool_names)
         self.assertIn("compile_project", tool_names)
+        self.assertIn("search_code", tool_names)
 
     def test_02_project_status_and_tree(self):
         info = self.tool("get_project_info", req_id=20)
@@ -118,6 +119,15 @@ class TestCodesysLiveE2E(unittest.TestCase):
         # 4. Delete POU cleanup
         delete_res = self.tool("delete_pou", {"name": test_pou}, req_id=34)
         self.assertTrue(delete_res.get("deleted", False))
+
+    def test_04_search_code(self):
+        info = self.tool("get_project_info", req_id=40)
+        if not info.get("isOpen", False):
+            self.skipTest("No project is currently open in CODESYS.")
+
+        search_res = self.tool("search_code", {"query": "PROGRAM", "is_regex": False}, req_id=41)
+        self.assertIn("matches", search_res)
+        self.assertIn("totalMatches", search_res)
 
 if __name__ == "__main__":
     unittest.main()

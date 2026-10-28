@@ -30,7 +30,7 @@ namespace CodesysMcpTests
 
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools, "tools array should not be null");
-            Assert.AreEqual(10, tools.Count, "Expected exactly 10 registered tools");
+            Assert.AreEqual(11, tools.Count, "Expected exactly 11 registered tools");
 
             var expectedTools = new HashSet<string>
             {
@@ -43,7 +43,8 @@ namespace CodesysMcpTests
                 "delete_pou",
                 "compile_project",
                 "get_compiler_messages",
-                "save_project"
+                "save_project",
+                "search_code"
             };
 
             foreach (Dictionary<string, object> tool in tools)
@@ -134,6 +135,32 @@ namespace CodesysMcpTests
             var content = result["content"] as ArrayList;
             var firstItem = content[0] as Dictionary<string, object>;
             Assert.Contains("name", firstItem["text"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestSearchCodeWithoutQueryFailsValidation()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 8, \"method\": \"tools/call\", \"params\": {\"name\": \"search_code\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]), "isError should be true when missing 'query'");
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            Assert.Contains("query", firstItem["text"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestSearchCodeInvalidRegexReturnsError()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 9, \"method\": \"tools/call\", \"params\": {\"name\": \"search_code\", \"arguments\": {\"query\": \"[unclosed-regex(\", \"is_regex\": true}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]), "isError should be true on invalid regex pattern");
         }
     }
 }

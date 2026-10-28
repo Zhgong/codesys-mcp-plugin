@@ -292,6 +292,16 @@ namespace CodesysMcp
                 case "save_project":
                     return new { saved = CodesysOperations.SaveProject() };
 
+                case "search_code":
+                    if (!args.ContainsKey("query") || string.IsNullOrEmpty(args["query"]?.ToString()))
+                        throw new ArgumentException("Parameter 'query' is required.");
+                    string searchQuery = args["query"].ToString();
+                    bool isRegex = args.ContainsKey("is_regex") && Convert.ToBoolean(args["is_regex"]);
+                    bool caseSensitive = args.ContainsKey("case_sensitive") && Convert.ToBoolean(args["case_sensitive"]);
+                    string searchScope = args.ContainsKey("scope") ? args["scope"]?.ToString() : "all";
+                    int maxResults = args.ContainsKey("max_results") ? Convert.ToInt32(args["max_results"]) : 100;
+                    return CodesysOperations.SearchCode(searchQuery, isRegex, caseSensitive, searchScope, maxResults);
+
                 default:
                     throw new NotSupportedException($"Tool '{name}' is not recognized.");
             }
@@ -425,6 +435,24 @@ namespace CodesysMcp
                     {
                         type = "object",
                         properties = new { }
+                    }
+                },
+                new
+                {
+                    name = "search_code",
+                    description = "Search for text or regular expressions across all POUs, GVLs, and DUTs in the active CODESYS project.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            query = new { type = "string", description = "Text or regular expression pattern to search for" },
+                            is_regex = new { type = "boolean", description = "Whether query is a regex pattern (default: false)" },
+                            case_sensitive = new { type = "boolean", description = "Whether search is case-sensitive (default: false)" },
+                            scope = new { type = "string", description = "Search scope: all, pou, gvl, or dut (default: all)", @enum = new[] { "all", "pou", "gvl", "dut" } },
+                            max_results = new { type = "integer", description = "Maximum number of matched lines to return (default: 100)" }
+                        },
+                        required = new[] { "query" }
                     }
                 }
             };
