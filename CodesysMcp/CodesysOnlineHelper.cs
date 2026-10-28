@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 
 namespace CodesysMcp
@@ -27,6 +28,8 @@ namespace CodesysMcp
         public bool success { get; set; }
         public string name { get; set; }
         public string value { get; set; }
+        public string actualValue { get; set; }
+        public bool verified { get; set; }
         public bool isForced { get; set; }
         public string message { get; set; }
     }
@@ -55,14 +58,31 @@ namespace CodesysMcp
             }
         }
 
+        private static object GetMemberValue(object target, string name)
+        {
+            if (target == null) return null;
+            var type = target.GetType();
+            var prop = type.GetProperty(name);
+            if (prop != null)
+            {
+                try { return prop.GetValue(target, null); } catch { }
+            }
+            var method = type.GetMethod(name, Type.EmptyTypes);
+            if (method != null)
+            {
+                try { return method.Invoke(target, null); } catch { }
+            }
+            return null;
+        }
+
         private static object GetOrCreateOnlineApp(string appName = null)
         {
             if (_cachedOnlineApp != null)
             {
                 try
                 {
-                    var isLoggedProp = _cachedOnlineApp.GetType().GetProperty("is_logged_in");
-                    bool loggedIn = Convert.ToBoolean(isLoggedProp?.GetValue(_cachedOnlineApp, null));
+                    var isLoggedVal = GetMemberValue(_cachedOnlineApp, "is_logged_in");
+                    bool loggedIn = isLoggedVal != null && Convert.ToBoolean(isLoggedVal);
                     if (loggedIn)
                     {
                         return _cachedOnlineApp;
@@ -85,37 +105,24 @@ namespace CodesysMcp
                 throw new InvalidOperationException("No active CODESYS project is currently open.");
             }
 
-            object appObj = null;
+            object appTarget = null;
             if (!string.IsNullOrEmpty(appName))
             {
-                var appExt = CodesysOperations.FindObjectByName(appName);
-                if (appExt != null)
+                appTarget = CodesysOperations.FindObjectByName(appName);
+                if (appTarget == null)
                 {
-                    appObj = CodesysOperations.GetExtension<_3S.CoDeSys.ScriptEngine.BasicFunctionality.IScriptApplication>(appExt);
+                    throw new FileNotFoundException($"Application object '{appName}' not found in active project.");
                 }
             }
+            // Note: If appName is null/empty, we leave appTarget = null so CODESYS automatically targets the active application.
 
-            if (appObj == null)
+            MethodInfo createOnlineAppMethod = null;
+            foreach (var m in CodesysContext.Online.GetType().GetMethods())
             {
-                var activeAppExt = proj.active_application;
-                if (activeAppExt != null)
+                if (m.Name == "create_online_application")
                 {
-                    appObj = CodesysOperations.GetExtension<_3S.CoDeSys.ScriptEngine.BasicFunctionality.IScriptApplication>(activeAppExt);
-                }
-            }
-
-            var createOnlineAppMethod = CodesysContext.Online.GetType().GetMethod("create_online_application", new Type[] { appObj?.GetType() ?? typeof(object) })
-                ?? CodesysContext.Online.GetType().GetMethod("create_online_application");
-
-            if (createOnlineAppMethod == null)
-            {
-                foreach (var m in CodesysContext.Online.GetType().GetMethods())
-                {
-                    if (m.Name == "create_online_application")
-                    {
-                        createOnlineAppMethod = m;
-                        break;
-                    }
+                    createOnlineAppMethod = m;
+                    break;
                 }
             }
 
@@ -125,9 +132,16 @@ namespace CodesysMcp
             }
 
             var pCount = createOnlineAppMethod.GetParameters().Length;
-            object[] callArgs = pCount == 1 ? new object[] { appObj } : new object[0];
+            object[] callArgs = pCount >= 1 ? new object[] { appTarget } : new object[0];
 
-            _cachedOnlineApp = createOnlineAppMethod.Invoke(CodesysContext.Online, callArgs);
+            try
+            {
+                _cachedOnlineApp = createOnlineAppMethod.Invoke(CodesysContext.Online, callArgs);
+            }
+            catch (TargetInvocationException ex)
+            {
+                throw ex.InnerException ?? ex;
+            }
             return _cachedOnlineApp;
         }
 
@@ -146,14 +160,14 @@ namespace CodesysMcp
 
                 try
                 {
-                    var isLoggedProp = _cachedOnlineApp.GetType().GetProperty("is_logged_in");
-                    res.isLoggedIn = Convert.ToBoolean(isLoggedProp?.GetValue(_cachedOnlineApp, null));
+                    var isLoggedVal = GetMemberValue(_cachedOnlineApp, "is_logged_in");
+                    res.isLoggedIn = isLoggedVal != null && Convert.ToBoolean(isLoggedVal);
 
-                    var appStateProp = _cachedOnlineApp.GetType().GetProperty("application_state");
-                    res.applicationState = appStateProp?.GetValue(_cachedOnlineApp, null)?.ToString() ?? "Unknown";
+                    var appStateVal = GetMemberValue(_cachedOnlineApp, "application_state");
+                    res.applicationState = appStateVal?.ToString() ?? "Unknown";
 
-                    var opStateProp = _cachedOnlineApp.GetType().GetProperty("operation_state");
-                    res.operationState = opStateProp?.GetValue(_cachedOnlineApp, null)?.ToString() ?? "Unknown";
+                    var opStateVal = GetMemberValue(_cachedOnlineApp, "operation_state");
+                    res.operationState = opStateVal?.ToString() ?? "Unknown";
 
                     var forcedProp = _cachedOnlineApp.GetType().GetMethod("get_forced_expressions");
                     if (forcedProp != null)
@@ -182,7 +196,7 @@ namespace CodesysMcp
             });
         }
 
-        public static OnlineStatusResult PlcLogin(string mode = "try_online_change", string appName = null)
+        public static OnlineStatusResult PlcLogin(string mode = "try_online_change", bool deleteForeignApps = true, string appName = null)
         {
             return CodesysContext.RunOnPrimaryThread(() =>
             {
@@ -195,33 +209,54 @@ namespace CodesysMcp
 
                 var param0Type = loginMethod.GetParameters()[0].ParameterType;
 
-                // OnlineChangeOption: Never = 0, Try = 1, Force = 2, Keep = 3
+                // OnlineChangeOption: Never = 0 (Download), Try = 1 (Online Change with Download fallback), Force = 2, Keep = 3
                 int optionVal = 1; // Default to Try
-                if (string.Equals(mode, "login_only", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(mode, "never", StringComparison.OrdinalIgnoreCase))
+                string m = (mode ?? "").Trim().ToLowerInvariant();
+                if (m == "download" || m == "never")
                 {
                     optionVal = 0;
                 }
-                else if (string.Equals(mode, "force", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(mode, "download", StringComparison.OrdinalIgnoreCase))
+                else if (m == "try" || m == "try_online_change")
+                {
+                    optionVal = 1;
+                }
+                else if (m == "force" || m == "force_online_change")
                 {
                     optionVal = 2;
                 }
+                else if (m == "keep" || m == "login_only")
+                {
+                    optionVal = 3;
+                }
 
                 object changeOptionObj = Enum.ToObject(param0Type, optionVal);
-                object[] loginArgs = new object[] { changeOptionObj, false };
+                object[] loginArgs = new object[] { changeOptionObj, deleteForeignApps };
 
                 try
                 {
                     loginMethod.Invoke(onlineApp, loginArgs);
-                    CodesysContext.LogToIde($"plc_login: Logged in successfully with mode '{mode}'");
+                    var status = GetOnlineStatus();
+                    if (status.isLoggedIn)
+                    {
+                        CodesysContext.LogToIde($"[SUCCESS] plc_login: Connected to SoftPLC (State: {status.applicationState}, Operation: {status.operationState})");
+                    }
+                    else
+                    {
+                        CodesysContext.LogToIde($"[WARNING] plc_login: Session login returned false.");
+                    }
+                    return status;
                 }
                 catch (TargetInvocationException ex)
                 {
-                    throw ex.InnerException ?? ex;
+                    var inner = ex.InnerException ?? ex;
+                    CodesysContext.LogToIde($"[ERROR] plc_login failed: {inner.Message}");
+                    throw inner;
                 }
-
-                return GetOnlineStatus();
+                catch (Exception ex)
+                {
+                    CodesysContext.LogToIde($"[ERROR] plc_login failed: {ex.Message}");
+                    throw;
+                }
             });
         }
 
@@ -333,24 +368,41 @@ namespace CodesysMcp
                 {
                     var forceMethod = onlineApp.GetType().GetMethod("force_prepared_values");
                     forceMethod?.Invoke(onlineApp, null);
-                    CodesysContext.LogToIde($"write_variable: Forced '{name}' := '{value}'");
+                    CodesysContext.LogToIde($"[FORCE] write_variable: Forced '{name}' := '{value}'");
                 }
                 else
                 {
                     var writeMethod = onlineApp.GetType().GetMethod("write_prepared_values");
                     writeMethod?.Invoke(onlineApp, null);
-                    CodesysContext.LogToIde($"write_variable: Wrote '{name}' := '{value}'");
+                    CodesysContext.LogToIde($"[WRITE] write_variable: Wrote '{name}' := '{value}'");
                 }
+
+                string actual = null;
+                bool verified = false;
+                try
+                {
+                    var readValMethod = onlineApp.GetType().GetMethod("read_value", new Type[] { typeof(string) });
+                    actual = readValMethod?.Invoke(onlineApp, new object[] { name })?.ToString();
+                    if (actual != null)
+                    {
+                        verified = string.Equals(actual.Trim(), value?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                                   (double.TryParse(actual, out var d1) && double.TryParse(value, out var d2) && Math.Abs(d1 - d2) < 0.0001) ||
+                                   (bool.TryParse(actual, out var b1) && bool.TryParse(value, out var b2) && b1 == b2);
+                    }
+                }
+                catch { }
 
                 return new WriteVariableResult
                 {
                     success = true,
                     name = name,
                     value = value,
+                    actualValue = actual,
+                    verified = verified,
                     isForced = force,
                     message = force
-                        ? $"Variable '{name}' was forced to '{value}'."
-                        : $"Variable '{name}' was written with value '{value}'."
+                        ? $"Variable '{name}' was forced to '{value}' (Readback: '{actual}', Verified: {verified})."
+                        : $"Variable '{name}' was written with value '{value}' (Readback: '{actual}', Verified: {verified})."
                 };
             });
         }
@@ -401,11 +453,16 @@ namespace CodesysMcp
 
                 if (app == null)
                 {
-                    var activeAppExt = proj.active_application;
-                    if (activeAppExt != null)
+                    try
                     {
-                        app = CodesysOperations.GetExtension<_3S.CoDeSys.ScriptEngine.BasicFunctionality.IScriptApplication>(activeAppExt);
+                        var prop = proj.GetType().GetProperty("active_application");
+                        var activeAppExt = prop?.GetValue(proj, null);
+                        if (activeAppExt != null)
+                        {
+                            app = CodesysOperations.GetExtension<_3S.CoDeSys.ScriptEngine.BasicFunctionality.IScriptApplication>(activeAppExt);
+                        }
                     }
+                    catch { }
                 }
 
                 if (app == null) throw new InvalidOperationException("Could not resolve active application to create boot project.");

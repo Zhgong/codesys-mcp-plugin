@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -223,6 +224,11 @@ namespace CodesysMcp
                 }
                 catch (Exception ex)
                 {
+                    while (ex is TargetInvocationException && ex.InnerException != null)
+                    {
+                        ex = ex.InnerException;
+                    }
+                    CodesysContext.LogToIde($"[ERROR] MCP Tool '{toolName}' failed: {ex.Message}");
                     return new
                     {
                         jsonrpc = "2.0",
@@ -249,7 +255,7 @@ namespace CodesysMcp
 
         private object ExecuteTool(string name, Dictionary<string, object> args)
         {
-            CodesysContext.LogToIde($"MCP Tool '{name}' called");
+            CodesysContext.LogToIde($"[REQUEST] MCP Tool '{name}' invoked");
 
             switch (name)
             {
@@ -335,7 +341,8 @@ namespace CodesysMcp
                 case "plc_login":
                     string loginMode = args.ContainsKey("mode") ? args["mode"]?.ToString() : "try_online_change";
                     string loginApp = args.ContainsKey("app_name") ? args["app_name"]?.ToString() : null;
-                    return CodesysOperations.PlcLogin(loginMode, loginApp);
+                    bool delForeign = !args.ContainsKey("delete_foreign_apps") || Convert.ToBoolean(args["delete_foreign_apps"]);
+                    return CodesysOperations.PlcLogin(loginMode, delForeign, loginApp);
 
                 case "plc_logout":
                     return CodesysOperations.PlcLogout();
@@ -616,13 +623,14 @@ namespace CodesysMcp
                 new
                 {
                     name = "plc_login",
-                    description = "Log in to PLC or SoftPLC instance. Defaults to 'try_online_change' to hot-update code without stopping PLC.",
+                    description = "Log in to PLC or SoftPLC instance with seamless headless parameter support. Defaults to 'try_online_change' and delete_foreign_apps=true to eliminate modal dialogs.",
                     inputSchema = new
                     {
                         type = "object",
                         properties = new
                         {
-                            mode = new { type = "string", description = "Login mode: 'try_online_change' (default, safe hot-update), 'login_only' (monitor only, reject if mismatched), or 'download' (full download/stop)", @enum = new[] { "try_online_change", "login_only", "download" } },
+                            mode = new { type = "string", description = "Login mode: 'try_online_change' (default, safe hot-update), 'download' / 'never' (full download/stop), 'force_online_change', or 'login_only' / 'keep' (monitor only)", @enum = new[] { "try_online_change", "download", "force_online_change", "login_only" } },
+                            delete_foreign_apps = new { type = "boolean", description = "If true (default), automatically replaces conflicting applications on the PLC without modal confirmation dialogs." },
                             app_name = new { type = "string", description = "Optional target application name." }
                         }
                     }

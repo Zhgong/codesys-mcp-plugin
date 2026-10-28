@@ -48,39 +48,68 @@ namespace CodesysMcp
             }
         }
 
+        private static readonly object _queueLock = new object();
+        private static readonly System.Collections.Generic.Queue<Action> _workQueue = new System.Collections.Generic.Queue<Action>();
+
+        public static void ProcessQueue(int maxItems = 20)
+        {
+            for (int i = 0; i < maxItems; i++)
+            {
+                Action act = null;
+                lock (_queueLock)
+                {
+                    if (_workQueue.Count > 0)
+                    {
+                        act = _workQueue.Dequeue();
+                    }
+                }
+                if (act == null) break;
+                try
+                {
+                    act();
+                }
+                catch { }
+            }
+        }
+
         public static T RunOnPrimaryThread<T>(Func<T> func)
         {
-            if (System == null)
+            if (System == null || Thread.CurrentThread == _primaryThread)
             {
                 return func();
             }
 
-            // If running in interactive CODESYS IDE (UI mode) and we have the UI SynchronizationContext,
-            // marshal calls from background Named Pipe threads onto the main UI thread.
-            if (System.ui_present && _syncContext != null && Thread.CurrentThread != _primaryThread)
+            T result = default(T);
+            Exception capturedException = null;
+            using (var done = new ManualResetEvent(false))
             {
-                T result = default(T);
-                Exception capturedException = null;
-                _syncContext.Send(_ =>
+                lock (_queueLock)
                 {
-                    try
+                    _workQueue.Enqueue(() =>
                     {
-                        result = func();
-                    }
-                    catch (Exception ex)
-                    {
-                        capturedException = ex;
-                    }
-                }, null);
-
-                if (capturedException != null)
-                {
-                    ExceptionDispatchInfo.Capture(capturedException).Throw();
+                        try
+                        {
+                            result = func();
+                        }
+                        catch (Exception ex)
+                        {
+                            capturedException = ex;
+                        }
+                        finally
+                        {
+                            done.Set();
+                        }
+                    });
                 }
-                return result;
+
+                done.WaitOne();
             }
 
-            return func();
+            if (capturedException != null)
+            {
+                ExceptionDispatchInfo.Capture(capturedException).Throw();
+            }
+            return result;
         }
 
         public static void RunOnPrimaryThread(Action action)

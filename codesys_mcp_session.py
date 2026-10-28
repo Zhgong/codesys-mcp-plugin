@@ -60,24 +60,45 @@ try:
 
     log("system.ui_present = %s" % ui_present)
 
-    # Keep the session alive with main-thread pump if running headless (--noUI),
-    # or if explicitly requested via CODESYS_MCP_BLOCKING=1
-    if not ui_present or os.environ.get("CODESYS_MCP_BLOCKING", "0") == "1":
-        log("Entering headless keep-alive loop...")
-        while True:
-            try:
-                system.delay(100)
-            except:
-                time.sleep(0.1)
-    else:
-        log("Interactive IDE mode detected. Background Named Pipe server is active!")
+    # Suppress modal prompt dialogs during automated script operations
+    try:
+        from _3S.CoDeSys.ScriptEngine.BasicFunctionality import PromptHandling
+        system.prompt_handling = PromptHandling.NONE
+    except:
+        pass
+
+    # Open project if passed via arguments or environment variable
+    proj_arg = os.environ.get("CODESYS_MCP_PROJECT")
+    if not proj_arg:
+        for arg in sys.argv[1:]:
+            if arg.lower().endswith(".project") and os.path.exists(arg):
+                proj_arg = arg
+                break
+
+    if proj_arg and os.path.exists(proj_arg):
         try:
-            system.write_message(
-                Severity.Information,
-                "[CODESYS MCP] Native Stdio/Pipe MCP Server started on \\\\.\\pipe\\%s" % pipe_name
-            )
-        except:
-            pass
+            if projects.primary is None:
+                log("Opening project on startup: %s" % proj_arg)
+                projects.open(proj_arg)
+                log("Project opened successfully!")
+        except Exception as e:
+            log("Warning: could not open project on startup: %s" % str(e))
+
+    try:
+        system.write_message(
+            Severity.Information,
+            "[CODESYS MCP] Native Stdio/Pipe MCP Server started on \\\\.\\pipe\\%s" % pipe_name
+        )
+    except:
+        pass
+
+    log("Entering MCP main dispatch loop (processing primary thread queue)...")
+    while True:
+        try:
+            CodesysMcp.CodesysContext.ProcessQueue(20)
+            system.delay(50)
+        except Exception:
+            time.sleep(0.05)
 except Exception as e:
     log("FATAL ERROR: " + str(e))
     log(traceback.format_exc())
