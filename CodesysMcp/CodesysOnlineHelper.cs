@@ -410,7 +410,7 @@ namespace CodesysMcp
 
                 if (app == null) throw new InvalidOperationException("Could not resolve active application to create boot project.");
 
-                app.create_boot_application();
+                app.create_boot_application(null);
                 CodesysContext.LogToIde("create_boot_application: Successfully created boot project for application");
                 return "Boot application created successfully.";
             });

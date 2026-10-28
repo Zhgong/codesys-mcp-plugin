@@ -159,6 +159,30 @@ namespace CodesysMcp
                 }
             }
 
+            try
+            {
+                var baseProp = obj.GetType().GetProperty("BaseObject");
+                if (baseProp != null)
+                {
+                    var baseVal = baseProp.GetValue(obj, null);
+                    if (baseVal is TExt baseMatch) return baseMatch;
+                }
+
+                var extsProp = obj.GetType().GetProperty("Extensions");
+                if (extsProp != null)
+                {
+                    var exts = extsProp.GetValue(obj, null) as System.Collections.IEnumerable;
+                    if (exts != null)
+                    {
+                        foreach (var ext in exts)
+                        {
+                            if (ext is TExt match) return match;
+                        }
+                    }
+                }
+            }
+            catch { }
+
             return null;
         }
 
@@ -290,7 +314,7 @@ namespace CodesysMcp
             return node;
         }
 
-        public static IExtendedObject<IScriptObject> FindObjectByName(string name)
+        public static object FindObjectByName(string name)
         {
             var proj = CodesysContext.PrimaryProject;
             if (proj == null) return null;
@@ -314,7 +338,7 @@ namespace CodesysMcp
             return null;
         }
 
-        public static IExtendedObject<IScriptObject> GetActiveApplicationObject(IScriptProject proj)
+        public static object GetActiveApplicationObject(IScriptProject proj)
         {
             if (proj == null) return null;
             var activeAppExt = proj.active_application;
@@ -342,7 +366,8 @@ namespace CodesysMcp
                     throw new FileNotFoundException("POU/Object not found: " + name);
                 }
 
-                var obj = extObj.BaseObject;
+                var obj = GetExtension<IScriptObject>(extObj) ?? extObj as IScriptObject;
+                if (obj == null) throw new InvalidOperationException("Could not resolve IScriptObject for POU: " + name);
                 var marker = GetExtension<IScriptTextualObjectMarker>(extObj);
                 bool hasDecl = marker != null && marker.has_textual_declaration;
                 bool hasImpl = marker != null && marker.has_textual_implementation;
@@ -484,8 +509,8 @@ namespace CodesysMcp
                     };
                 }
 
-                var obj = extObj.BaseObject;
-                obj.remove();
+                var obj = GetExtension<IScriptObject>(extObj) ?? extObj as IScriptObject;
+                obj?.remove();
                 return true;
             });
         }
