@@ -53,6 +53,8 @@
   <ItemGroup>
     <Compile Include="CodesysContext.cs" />
     <Compile Include="CodesysOperations.cs" />
+    <Compile Include="CodesysOnlineHelper.cs" />
+    <Compile Include="DiffViewerHelper.cs" />
     <Compile Include="McpServer.cs" />
     <Compile Include="ServerBootstrap.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

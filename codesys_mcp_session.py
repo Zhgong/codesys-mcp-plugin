@@ -41,8 +41,14 @@ try:
 
     pipe_name = os.environ.get("CODESYS_MCP_PIPE", "codesys_mcp_pipe")
 
+    online_obj = None
+    try:
+        online_obj = online
+    except NameError:
+        pass
+
     log("Starting C# Stdio/Pipe MCP Server on pipe: %s..." % pipe_name)
-    CodesysMcp.ServerBootstrap.Start(projects, system, pipe_name)
+    CodesysMcp.ServerBootstrap.Start(projects, system, online_obj, pipe_name)
     log("C# Native Pipe MCP Server is live!")
 
     # Check if UI is present (Interactive IDE mode vs Headless --noUI mode)

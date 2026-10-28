@@ -9,10 +9,15 @@ namespace CodesysMcp
 
         public static void Start(object projects, object system, string pipeName = McpServer.DefaultPipeName)
         {
+            Start(projects, system, null, pipeName);
+        }
+
+        public static void Start(object projects, object system, object online, string pipeName = McpServer.DefaultPipeName)
+        {
             try
             {
-                Console.WriteLine("[CodesysMcp] Initializing context with projects and system...");
-                CodesysContext.Initialize(projects, system);
+                Console.WriteLine("[CodesysMcp] Initializing context with projects, system, and online...");
+                CodesysContext.Initialize(projects, system, online);
 
                 if (_server != null)
                 {

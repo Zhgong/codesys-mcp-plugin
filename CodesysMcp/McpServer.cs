@@ -325,6 +325,62 @@ namespace CodesysMcp
                     string pOutDir = args.ContainsKey("output_dir") ? args["output_dir"]?.ToString() : null;
                     return CodesysOperations.PreviewDiff(pTarget, pViewer, pOutDir);
 
+                case "create_boot_application":
+                    string bootApp = args.ContainsKey("app_name") ? args["app_name"]?.ToString() : null;
+                    return new { success = true, message = CodesysOperations.CreateBootApplication(bootApp) };
+
+                case "get_online_status":
+                    return CodesysOperations.GetOnlineStatus();
+
+                case "plc_login":
+                    string loginMode = args.ContainsKey("mode") ? args["mode"]?.ToString() : "try_online_change";
+                    string loginApp = args.ContainsKey("app_name") ? args["app_name"]?.ToString() : null;
+                    return CodesysOperations.PlcLogin(loginMode, loginApp);
+
+                case "plc_logout":
+                    return CodesysOperations.PlcLogout();
+
+                case "plc_control":
+                    if (!args.ContainsKey("action") || string.IsNullOrEmpty(args["action"]?.ToString()))
+                        throw new ArgumentException("Parameter 'action' is required ('start', 'stop', 'reset').");
+                    return CodesysOperations.PlcControl(args["action"].ToString());
+
+                case "read_variables":
+                    var exprList = new List<string>();
+                    if (args.ContainsKey("expressions"))
+                    {
+                        var arr = args["expressions"] as System.Collections.IEnumerable;
+                        if (arr != null)
+                        {
+                            foreach (var item in arr) if (item != null) exprList.Add(item.ToString());
+                        }
+                    }
+                    else if (args.ContainsKey("expression"))
+                    {
+                        exprList.Add(args["expression"].ToString());
+                    }
+                    return CodesysOperations.ReadVariables(exprList);
+
+                case "write_variable":
+                    if (!args.ContainsKey("name") || string.IsNullOrEmpty(args["name"]?.ToString()))
+                        throw new ArgumentException("Parameter 'name' is required.");
+                    string varName = args["name"].ToString();
+                    string varVal = args.ContainsKey("value") ? args["value"]?.ToString() : "";
+                    bool isForce = args.ContainsKey("force") && Convert.ToBoolean(args["force"]);
+                    return CodesysOperations.WriteVariable(varName, varVal, isForce);
+
+                case "unforce_variables":
+                    var unforceList = new List<string>();
+                    if (args.ContainsKey("expressions"))
+                    {
+                        var arr = args["expressions"] as System.Collections.IEnumerable;
+                        if (arr != null)
+                        {
+                            foreach (var item in arr) if (item != null) unforceList.Add(item.ToString());
+                        }
+                    }
+                    return CodesysOperations.UnforceVariables(unforceList);
+
                 default:
                     throw new NotSupportedException($"Tool '{name}' is not recognized.");
             }
@@ -531,6 +587,120 @@ namespace CodesysMcp
                             name = new { type = "string", description = "Optional POU name to preview. If omitted, exports all modified POUs in the current session." },
                             viewer = new { type = "string", description = "Diff viewer to launch: 'vscode' (default), 'browser', 'auto', or 'none'", @enum = new[] { "vscode", "browser", "auto", "none" } },
                             output_dir = new { type = "string", description = "Optional custom output directory to export before/after files (defaults to <project>/.diff_preview)" }
+                        }
+                    }
+                },
+                new
+                {
+                    name = "create_boot_application",
+                    description = "Create and save an offline boot application (boot project) so the PLC/SoftPLC can run autonomously upon boot/power cycle.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            app_name = new { type = "string", description = "Optional application name. If omitted, uses active application." }
+                        }
+                    }
+                },
+                new
+                {
+                    name = "get_online_status",
+                    description = "Get current online connection status to PLC/SoftPLC, including application state (RUN, STOP, HALTED) and forced expressions.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new { }
+                    }
+                },
+                new
+                {
+                    name = "plc_login",
+                    description = "Log in to PLC or SoftPLC instance. Defaults to 'try_online_change' to hot-update code without stopping PLC.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            mode = new { type = "string", description = "Login mode: 'try_online_change' (default, safe hot-update), 'login_only' (monitor only, reject if mismatched), or 'download' (full download/stop)", @enum = new[] { "try_online_change", "login_only", "download" } },
+                            app_name = new { type = "string", description = "Optional target application name." }
+                        }
+                    }
+                },
+                new
+                {
+                    name = "plc_logout",
+                    description = "Safely disconnect and log out from the PLC or SoftPLC instance.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new { }
+                    }
+                },
+                new
+                {
+                    name = "plc_control",
+                    description = "Control PLC state: 'start' (RUN), 'stop' (STOP), or 'reset'.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            action = new { type = "string", description = "Control action to execute", @enum = new[] { "start", "stop", "reset" } }
+                        },
+                        required = new[] { "action" }
+                    }
+                },
+                new
+                {
+                    name = "read_variables",
+                    description = "Batch read real-time variable values from the running PLC/SoftPLC (e.g. 'GVL_Data.rCurrentPressure', 'MOTION_PRG.eDispState').",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            expressions = new
+                            {
+                                type = "array",
+                                items = new { type = "string" },
+                                description = "List of variable expressions to read"
+                            }
+                        },
+                        required = new[] { "expressions" }
+                    }
+                },
+                new
+                {
+                    name = "write_variable",
+                    description = "Write a value or force a variable in the running PLC/SoftPLC (useful for triggering inputs or injecting test signals).",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            name = new { type = "string", description = "Variable expression/name (e.g. 'GVL_Data.bStartCycle')" },
+                            value = new { type = "string", description = "Value to write (e.g. 'TRUE', '12.5', 'E_PressState.STATE_IDLE')" },
+                            force = new { type = "boolean", description = "If true, permanently forces the variable; if false, performs a single standard write." }
+                        },
+                        required = new[] { "name", "value" }
+                    }
+                },
+                new
+                {
+                    name = "unforce_variables",
+                    description = "Unforce (release) forced variables on the running PLC/SoftPLC.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            expressions = new
+                            {
+                                type = "array",
+                                items = new { type = "string" },
+                                description = "Optional list of expressions to unforce. If omitted, unforces all currently forced expressions."
+                            }
                         }
                     }
                 }

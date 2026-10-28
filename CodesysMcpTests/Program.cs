@@ -88,7 +88,8 @@ namespace CodesysMcpTests
                 typeof(StreamFramingTests),
                 typeof(SearchEngineTests),
                 typeof(DiffEngineTests),
-                typeof(DiffViewerTests)
+                typeof(DiffViewerTests),
+                typeof(OnlineTests)
             };
 
             int passed = 0;

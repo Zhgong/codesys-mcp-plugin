@@ -10,18 +10,21 @@ namespace CodesysMcp
     {
         public static IScriptProjects Projects { get; private set; }
         public static ISystem System { get; private set; }
+        public static object Online { get; private set; }
         private static object _rawSystem;
         private static Thread _primaryThread;
         private static SynchronizationContext _syncContext;
 
         public static bool HasSystem => _rawSystem != null;
+        public static bool HasOnline => Online != null;
         public static bool IsInitialized => Projects != null && System != null;
 
-        public static void Initialize(object projectsObj, object systemObj)
+        public static void Initialize(object projectsObj, object systemObj, object onlineObj = null)
         {
             _rawSystem = systemObj;
             Projects = (IScriptProjects)projectsObj;
             System = (ISystem)systemObj;
+            Online = onlineObj;
             _primaryThread = Thread.CurrentThread;
             _syncContext = SynchronizationContext.Current;
         }

@@ -1050,5 +1050,45 @@ namespace CodesysMcp
                 return res;
             });
         }
+
+        public static string CreateBootApplication(string appName = null)
+        {
+            return CodesysOnlineHelper.CreateBootApplication(appName);
+        }
+
+        public static OnlineStatusResult GetOnlineStatus()
+        {
+            return CodesysOnlineHelper.GetOnlineStatus();
+        }
+
+        public static OnlineStatusResult PlcLogin(string mode = "try_online_change", string appName = null)
+        {
+            return CodesysOnlineHelper.PlcLogin(mode, appName);
+        }
+
+        public static OnlineStatusResult PlcLogout()
+        {
+            return CodesysOnlineHelper.PlcLogout();
+        }
+
+        public static OnlineStatusResult PlcControl(string action)
+        {
+            return CodesysOnlineHelper.PlcControl(action);
+        }
+
+        public static ReadVariablesResult ReadVariables(List<string> expressions)
+        {
+            return CodesysOnlineHelper.ReadVariables(expressions);
+        }
+
+        public static WriteVariableResult WriteVariable(string name, string value, bool force = false)
+        {
+            return CodesysOnlineHelper.WriteVariable(name, value, force);
+        }
+
+        public static OnlineStatusResult UnforceVariables(List<string> expressions = null)
+        {
+            return CodesysOnlineHelper.UnforceVariables(expressions);
+        }
     }
 }
