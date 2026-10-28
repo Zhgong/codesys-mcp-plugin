@@ -249,6 +249,8 @@ namespace CodesysMcp
 
         private object ExecuteTool(string name, Dictionary<string, object> args)
         {
+            CodesysContext.LogToIde($"MCP Tool '{name}' called");
+
             switch (name)
             {
                 case "open_project":
@@ -301,6 +303,16 @@ namespace CodesysMcp
                     string searchScope = args.ContainsKey("scope") ? args["scope"]?.ToString() : "all";
                     int maxResults = args.ContainsKey("max_results") ? Convert.ToInt32(args["max_results"]) : 100;
                     return CodesysOperations.SearchCode(searchQuery, isRegex, caseSensitive, searchScope, maxResults);
+
+                case "get_diff":
+                    string diffTarget = args.ContainsKey("name") ? args["name"]?.ToString() : null;
+                    string diffSection = args.ContainsKey("section") ? args["section"]?.ToString() : "all";
+                    return CodesysOperations.GetDiff(diffTarget, diffSection);
+
+                case "rollback_pou":
+                    if (!args.ContainsKey("name") || string.IsNullOrEmpty(args["name"]?.ToString()))
+                        throw new ArgumentException("Parameter 'name' is required.");
+                    return CodesysOperations.RollbackPou(args["name"].ToString());
 
                 default:
                     throw new NotSupportedException($"Tool '{name}' is not recognized.");
@@ -453,6 +465,34 @@ namespace CodesysMcp
                             max_results = new { type = "integer", description = "Maximum number of matched lines to return (default: 100)" }
                         },
                         required = new[] { "query" }
+                    }
+                },
+                new
+                {
+                    name = "get_diff",
+                    description = "Get unified diff (git-like diff) showing modifications made to POUs during the current session.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            name = new { type = "string", description = "Optional POU name to get diff for. If omitted, returns diffs for all modified POUs." },
+                            section = new { type = "string", description = "Section to diff: all, declaration, or implementation (default: all)", @enum = new[] { "all", "declaration", "implementation" } }
+                        }
+                    }
+                },
+                new
+                {
+                    name = "rollback_pou",
+                    description = "Roll back a POU to its baseline snapshot before session modifications, or delete it if it was newly created.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            name = new { type = "string", description = "Name of the POU to roll back" }
+                        },
+                        required = new[] { "name" }
                     }
                 }
             };

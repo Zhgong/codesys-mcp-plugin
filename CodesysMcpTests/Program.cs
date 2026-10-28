@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 
 namespace CodesysMcpTests
@@ -62,6 +63,18 @@ namespace CodesysMcpTests
     {
         static int Main(string[] args)
         {
+            AppDomain.CurrentDomain.AssemblyResolve += (sender, resolveArgs) =>
+            {
+                string asmName = new AssemblyName(resolveArgs.Name).Name + ".dll";
+                string codesysCommon = @"C:\Program Files\CODESYS 3.5.20.50\CODESYS\Common";
+                string path = Path.Combine(codesysCommon, asmName);
+                if (File.Exists(path))
+                {
+                    return Assembly.LoadFrom(path);
+                }
+                return null;
+            };
+
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("==========================================================");
             Console.WriteLine(" Running CodesysMcp C# Core Unit Tests");
@@ -73,7 +86,8 @@ namespace CodesysMcpTests
                 typeof(ProtocolTests),
                 typeof(ToolValidationTests),
                 typeof(StreamFramingTests),
-                typeof(SearchEngineTests)
+                typeof(SearchEngineTests),
+                typeof(DiffEngineTests)
             };
 
             int passed = 0;

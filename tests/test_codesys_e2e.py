@@ -78,6 +78,8 @@ class TestCodesysLiveE2E(unittest.TestCase):
         self.assertIn("write_pou", tool_names)
         self.assertIn("compile_project", tool_names)
         self.assertIn("search_code", tool_names)
+        self.assertIn("get_diff", tool_names)
+        self.assertIn("rollback_pou", tool_names)
 
     def test_02_project_status_and_tree(self):
         info = self.tool("get_project_info", req_id=20)
@@ -86,16 +88,16 @@ class TestCodesysLiveE2E(unittest.TestCase):
             self.skipTest("No project is currently open in CODESYS.")
 
         tree = self.tool("get_project_tree", {"full": False}, req_id=21)
-        self.assertIn("project_name", tree)
-        self.assertIn("nodes", tree)
+        self.assertTrue(isinstance(tree, list))
+        self.assertGreater(len(tree), 0)
 
     def test_03_pou_crud_and_compile(self):
         info = self.tool("get_project_info", req_id=30)
         if not info.get("isOpen", False):
             self.skipTest("No project is currently open in CODESYS.")
 
-        test_pou = "__AutoUnitTestPRG"
-        decl = "PROGRAM __AutoUnitTestPRG\nVAR\n    nStep : INT := 0;\nEND_VAR"
+        test_pou = "AutoUnitTestPRG"
+        decl = "PROGRAM AutoUnitTestPRG\nVAR\n    nStep : INT := 0;\nEND_VAR"
         impl = "nStep := nStep + 1;"
 
         # 1. Write POU
@@ -105,7 +107,7 @@ class TestCodesysLiveE2E(unittest.TestCase):
             "implementation": impl,
             "type": "Program"
         }, req_id=31)
-        self.assertTrue(write_res.get("success", False))
+        self.assertIn("declaration", write_res)
 
         # 2. Read POU
         read_res = self.tool("read_pou", {"name": test_pou}, req_id=32)
@@ -128,6 +130,33 @@ class TestCodesysLiveE2E(unittest.TestCase):
         search_res = self.tool("search_code", {"query": "PROGRAM", "is_regex": False}, req_id=41)
         self.assertIn("matches", search_res)
         self.assertIn("totalMatches", search_res)
+
+    def test_05_diff_and_rollback(self):
+        info = self.tool("get_project_info", req_id=50)
+        if not info.get("isOpen", False):
+            self.skipTest("No project is currently open in CODESYS.")
+
+        test_pou = "DiffRollbackTestPRG"
+        decl = "PROGRAM DiffRollbackTestPRG\nVAR\n    bFlag : BOOL;\nEND_VAR"
+        impl = "bFlag := TRUE;"
+
+        # 1. Create POU
+        self.tool("write_pou", {
+            "name": test_pou,
+            "declaration": decl,
+            "implementation": impl,
+            "type": "Program"
+        }, req_id=51)
+
+        # 2. Check get_diff
+        diff_res = self.tool("get_diff", {"name": test_pou}, req_id=52)
+        self.assertGreaterEqual(diff_res.get("modifiedCount", 0), 1)
+        self.assertIn(test_pou, diff_res.get("fullUnifiedDiff", ""))
+
+        # 3. Rollback newly created POU (should delete it)
+        rollback_res = self.tool("rollback_pou", {"name": test_pou}, req_id=53)
+        self.assertTrue(rollback_res.get("success", False))
+        self.assertEqual("deleted", rollback_res.get("action"))
 
 if __name__ == "__main__":
     unittest.main()

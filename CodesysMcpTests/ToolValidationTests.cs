@@ -30,7 +30,7 @@ namespace CodesysMcpTests
 
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools, "tools array should not be null");
-            Assert.AreEqual(11, tools.Count, "Expected exactly 11 registered tools");
+            Assert.AreEqual(13, tools.Count, "Expected exactly 13 registered tools");
 
             var expectedTools = new HashSet<string>
             {
@@ -44,7 +44,9 @@ namespace CodesysMcpTests
                 "compile_project",
                 "get_compiler_messages",
                 "save_project",
-                "search_code"
+                "search_code",
+                "get_diff",
+                "rollback_pou"
             };
 
             foreach (Dictionary<string, object> tool in tools)
@@ -161,6 +163,58 @@ namespace CodesysMcpTests
             var result = res["result"] as Dictionary<string, object>;
             Assert.IsNotNull(result);
             Assert.IsTrue(Convert.ToBoolean(result["isError"]), "isError should be true on invalid regex pattern");
+        }
+
+        [TestMethod]
+        public void TestRollbackWithoutNameFailsValidation()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 12, \"method\": \"tools/call\", \"params\": {\"name\": \"rollback_pou\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]), "isError should be true when missing 'name'");
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            Assert.Contains("name", firstItem["text"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestGetDiffWithoutModificationsReturnsZeroCount()
+        {
+            CodesysOperations.ClearSnapshotsForTesting();
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 13, \"method\": \"tools/call\", \"params\": {\"name\": \"get_diff\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsFalse(Convert.ToBoolean(result["isError"]));
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            var json = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var diffRes = json.Deserialize<Dictionary<string, object>>(firstItem["text"]?.ToString());
+            Assert.AreEqual(0, Convert.ToInt32(diffRes["modifiedCount"]));
+        }
+
+        [TestMethod]
+        public void TestRollbackNonExistentSnapshotReturnsCleanMessage()
+        {
+            CodesysOperations.ClearSnapshotsForTesting();
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 14, \"method\": \"tools/call\", \"params\": {\"name\": \"rollback_pou\", \"arguments\": {\"name\": \"NonExistentPOU\"}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsFalse(Convert.ToBoolean(result["isError"]));
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            var json = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var rollbackRes = json.Deserialize<Dictionary<string, object>>(firstItem["text"]?.ToString());
+            Assert.IsFalse(Convert.ToBoolean(rollbackRes["success"]));
+            Assert.AreEqual("none", rollbackRes["action"]?.ToString());
         }
     }
 }

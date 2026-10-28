@@ -136,6 +136,8 @@ codesys-mcp-plugin/
 | `compile_project` | `clean?: bool`, `rebuild?: bool` | 编译当前工程并直接返回所有编译报错、警告明细 |
 | `get_compiler_messages` | 无 | 不重新触发编译，直接读取当前编译器消息列表 |
 | `search_code` | `query: string`, `is_regex?: bool`, `case_sensitive?: bool`, `scope?: string`, `max_results?: int` | 跨 POU、GVL、DUT 全局搜索普通文本或正则表达式，精准返回 1-based 行号及上下文 |
+| `get_diff` | `name?: string`, `section?: string` | 生成当前会话中对 POU 改动的标准 Unified Diff（类似 git diff）对比报告 |
+| `rollback_pou` | `name: string` | 一键将 POU 安全回滚至会话基线快照（若为会话中新创建的 POU 则安全删除） |
 
 ---
 

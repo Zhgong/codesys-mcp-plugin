@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using _3S.CoDeSys.ScriptEngine;
 using _3S.CoDeSys.ScriptEngine.BasicFunctionality;
@@ -59,6 +60,41 @@ namespace CodesysMcp
         public bool hasImplementation { get; set; }
     }
 
+    public class PouSnapshot
+    {
+        public string Name { get; set; }
+        public string PouType { get; set; }
+        public string OriginalDeclaration { get; set; }
+        public string OriginalImplementation { get; set; }
+        public bool ExistedBefore { get; set; }
+        public bool IsDeleted { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    public class PouDiffItem
+    {
+        public string name { get; set; }
+        public string status { get; set; } // "modified", "created", "deleted", "unchanged"
+        public string declarationDiff { get; set; }
+        public string implementationDiff { get; set; }
+        public string unifiedDiff { get; set; }
+    }
+
+    public class ProjectDiffResult
+    {
+        public int modifiedCount { get; set; }
+        public List<PouDiffItem> diffs { get; set; } = new List<PouDiffItem>();
+        public string fullUnifiedDiff { get; set; } = string.Empty;
+    }
+
+    public class RollbackResult
+    {
+        public string name { get; set; }
+        public bool success { get; set; }
+        public string action { get; set; } // "reverted", "deleted", "restored", "none"
+        public string message { get; set; }
+    }
+
     public class CompilerMessageResult
     {
         public string text { get; set; }
@@ -113,6 +149,13 @@ namespace CodesysMcp
             return null;
         }
 
+        private static readonly Dictionary<string, PouSnapshot> _snapshots = new Dictionary<string, PouSnapshot>(StringComparer.OrdinalIgnoreCase);
+
+        public static void ClearSnapshotsForTesting()
+        {
+            _snapshots.Clear();
+        }
+
         public static ProjectInfoResult GetProjectInfo()
         {
             return CodesysContext.RunOnPrimaryThread(() =>
@@ -158,6 +201,7 @@ namespace CodesysMcp
                     throw new InvalidOperationException("CodesysContext.Projects is not initialized.");
 
                 CodesysContext.Projects.open(projectPath);
+                _snapshots.Clear();
                 return GetProjectInfo();
             });
         }
@@ -169,6 +213,7 @@ namespace CodesysMcp
                 var proj = CodesysContext.PrimaryProject;
                 if (proj == null) return false;
                 proj.close();
+                _snapshots.Clear();
                 return true;
             });
         }
@@ -324,6 +369,38 @@ namespace CodesysMcp
             {
                 var extObj = FindObjectByName(name);
 
+                // Capture baseline snapshot before first modification in session
+                if (!_snapshots.ContainsKey(name))
+                {
+                    if (extObj != null)
+                    {
+                        var current = ReadPou(name);
+                        _snapshots[name] = new PouSnapshot
+                        {
+                            Name = name,
+                            PouType = current.type,
+                            OriginalDeclaration = current.declaration,
+                            OriginalImplementation = current.implementation,
+                            ExistedBefore = true,
+                            IsDeleted = false,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                    }
+                    else
+                    {
+                        _snapshots[name] = new PouSnapshot
+                        {
+                            Name = name,
+                            PouType = pouTypeStr,
+                            OriginalDeclaration = string.Empty,
+                            OriginalImplementation = string.Empty,
+                            ExistedBefore = false,
+                            IsDeleted = false,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                    }
+                }
+
                 if (extObj == null)
                 {
                     var projExt = CodesysContext.PrimaryProjectExtended;
@@ -377,6 +454,23 @@ namespace CodesysMcp
             {
                 var extObj = FindObjectByName(name);
                 if (extObj == null) return false;
+
+                // Capture baseline snapshot before deletion
+                if (!_snapshots.ContainsKey(name))
+                {
+                    var current = ReadPou(name);
+                    _snapshots[name] = new PouSnapshot
+                    {
+                        Name = name,
+                        PouType = current.type,
+                        OriginalDeclaration = current.declaration,
+                        OriginalImplementation = current.implementation,
+                        ExistedBefore = true,
+                        IsDeleted = true,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                }
+
                 var obj = extObj.BaseObject;
                 obj.remove();
                 return true;
@@ -678,6 +772,182 @@ namespace CodesysMcp
                 if (proj == null) return false;
                 proj.save();
                 return true;
+            });
+        }
+
+        public static ProjectDiffResult GetDiff(string name = null, string section = "all")
+        {
+            if (string.IsNullOrEmpty(section)) section = "all";
+
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var result = new ProjectDiffResult();
+                var targets = new List<string>();
+
+                if (!string.IsNullOrEmpty(name))
+                {
+                    if (_snapshots.ContainsKey(name))
+                    {
+                        targets.Add(name);
+                    }
+                    else
+                    {
+                        return result;
+                    }
+                }
+                else
+                {
+                    targets.AddRange(_snapshots.Keys);
+                }
+
+                var fullSb = new StringBuilder();
+
+                foreach (var targetName in targets)
+                {
+                    var snap = _snapshots[targetName];
+                    var diffItem = new PouDiffItem
+                    {
+                        name = targetName
+                    };
+
+                    string currentDecl = string.Empty;
+                    string currentImpl = string.Empty;
+                    bool currentExists = false;
+
+                    try
+                    {
+                        var live = ReadPou(targetName);
+                        if (live != null)
+                        {
+                            currentDecl = live.declaration ?? string.Empty;
+                            currentImpl = live.implementation ?? string.Empty;
+                            currentExists = true;
+                        }
+                    }
+                    catch
+                    {
+                        currentExists = false;
+                    }
+
+                    if (!snap.ExistedBefore && currentExists)
+                    {
+                        diffItem.status = "created";
+                    }
+                    else if (snap.ExistedBefore && !currentExists)
+                    {
+                        diffItem.status = "deleted";
+                    }
+                    else if (snap.ExistedBefore && currentExists)
+                    {
+                        diffItem.status = "modified";
+                    }
+                    else
+                    {
+                        diffItem.status = "unchanged";
+                    }
+
+                    string declDiff = string.Empty;
+                    string implDiff = string.Empty;
+
+                    bool includeDecl = section.Equals("all", StringComparison.OrdinalIgnoreCase) ||
+                                       section.Equals("declaration", StringComparison.OrdinalIgnoreCase);
+                    bool includeImpl = section.Equals("all", StringComparison.OrdinalIgnoreCase) ||
+                                       section.Equals("implementation", StringComparison.OrdinalIgnoreCase);
+
+                    if (includeDecl)
+                    {
+                        declDiff = DiffHelper.GenerateUnifiedDiff(
+                            snap.OriginalDeclaration,
+                            currentDecl,
+                            $"a/{targetName} (declaration)",
+                            $"b/{targetName} (declaration)");
+                        diffItem.declarationDiff = declDiff;
+                    }
+
+                    if (includeImpl)
+                    {
+                        implDiff = DiffHelper.GenerateUnifiedDiff(
+                            snap.OriginalImplementation,
+                            currentImpl,
+                            $"a/{targetName} (implementation)",
+                            $"b/{targetName} (implementation)");
+                        diffItem.implementationDiff = implDiff;
+                    }
+
+                    var itemUnifiedSb = new StringBuilder();
+                    if (!string.IsNullOrEmpty(declDiff))
+                    {
+                        itemUnifiedSb.AppendLine(declDiff);
+                    }
+                    if (!string.IsNullOrEmpty(implDiff))
+                    {
+                        if (itemUnifiedSb.Length > 0) itemUnifiedSb.AppendLine();
+                        itemUnifiedSb.AppendLine(implDiff);
+                    }
+
+                    diffItem.unifiedDiff = itemUnifiedSb.ToString().TrimEnd();
+
+                    if (!string.IsNullOrEmpty(diffItem.unifiedDiff) || diffItem.status != "unchanged")
+                    {
+                        result.diffs.Add(diffItem);
+                        if (!string.IsNullOrEmpty(diffItem.unifiedDiff))
+                        {
+                            if (fullSb.Length > 0) fullSb.AppendLine("\n");
+                            fullSb.Append(diffItem.unifiedDiff);
+                        }
+                    }
+                }
+
+                result.modifiedCount = result.diffs.Count;
+                result.fullUnifiedDiff = fullSb.ToString();
+                return result;
+            });
+        }
+
+        public static RollbackResult RollbackPou(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+                throw new ArgumentException("Parameter 'name' is required.");
+
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                if (!_snapshots.ContainsKey(name))
+                {
+                    return new RollbackResult
+                    {
+                        name = name,
+                        success = false,
+                        action = "none",
+                        message = $"No baseline snapshot found for '{name}'. It has not been modified in this session."
+                    };
+                }
+
+                var snap = _snapshots[name];
+
+                if (!snap.ExistedBefore)
+                {
+                    DeletePou(name);
+                    _snapshots.Remove(name);
+                    CodesysContext.LogToIde($"Rollback: Deleted newly created POU '{name}'");
+                    return new RollbackResult
+                    {
+                        name = name,
+                        success = true,
+                        action = "deleted",
+                        message = $"POU '{name}' was created in this session and has now been deleted."
+                    };
+                }
+
+                WritePou(name, snap.OriginalDeclaration, snap.OriginalImplementation, snap.PouType);
+                _snapshots.Remove(name);
+                CodesysContext.LogToIde($"Rollback: Reverted POU '{name}' to baseline snapshot");
+                return new RollbackResult
+                {
+                    name = name,
+                    success = true,
+                    action = snap.IsDeleted ? "restored" : "reverted",
+                    message = $"POU '{name}' has been successfully restored to its baseline snapshot."
+                };
             });
         }
     }

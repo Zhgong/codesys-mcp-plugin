@@ -135,6 +135,8 @@ Add the following to your MCP client configuration (e.g., `claude_desktop_config
 | `compile_project` | `clean?: bool`, `rebuild?: bool` | Triggers project compilation and returns structured error/warning messages. |
 | `get_compiler_messages` | None | Retrieves compiler errors and warnings without triggering a rebuild. |
 | `search_code` | `query: string`, `is_regex?: bool`, `case_sensitive?: bool`, `scope?: string`, `max_results?: int` | Searches plain text or regex across all POUs, GVLs, and DUTs with exact line numbers and context. |
+| `get_diff` | `name?: string`, `section?: string` | Generates standard Unified Diff showing modifications made during the current session. |
+| `rollback_pou` | `name: string` | Safely rolls back a POU to its session baseline snapshot, or deletes it if newly created. |
 
 ---
 

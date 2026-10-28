@@ -10,13 +10,16 @@ namespace CodesysMcp
     {
         public static IScriptProjects Projects { get; private set; }
         public static ISystem System { get; private set; }
+        private static object _rawSystem;
         private static Thread _primaryThread;
         private static SynchronizationContext _syncContext;
 
+        public static bool HasSystem => _rawSystem != null;
         public static bool IsInitialized => Projects != null && System != null;
 
         public static void Initialize(object projectsObj, object systemObj)
         {
+            _rawSystem = systemObj;
             Projects = (IScriptProjects)projectsObj;
             System = (ISystem)systemObj;
             _primaryThread = Thread.CurrentThread;
@@ -46,7 +49,7 @@ namespace CodesysMcp
         {
             if (System == null)
             {
-                throw new InvalidOperationException("CodesysContext is not initialized with System instance.");
+                return func();
             }
 
             // If running in interactive CODESYS IDE (UI mode) and we have the UI SynchronizationContext,
@@ -84,6 +87,32 @@ namespace CodesysMcp
                 action();
                 return null;
             });
+        }
+
+        public static void LogToIde(string message, int severity = 3)
+        {
+            if (!HasSystem) return;
+            try
+            {
+                RunOnPrimaryThread(() =>
+                {
+                    try
+                    {
+                        dynamic sys = _rawSystem;
+                        sys.write_message(severity, "[CodesysMcp] " + message, null, 0, 0);
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            dynamic sys = _rawSystem;
+                            sys.write_message("[CodesysMcp] " + message);
+                        }
+                        catch { }
+                    }
+                });
+            }
+            catch { }
         }
     }
 }
