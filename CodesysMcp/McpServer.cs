@@ -314,6 +314,10 @@ namespace CodesysMcp
                         throw new ArgumentException("Parameter 'name' is required.");
                     return CodesysOperations.RollbackPou(args["name"].ToString());
 
+                case "get_ide_messages":
+                    string catParam = args.ContainsKey("category") ? args["category"]?.ToString() : null;
+                    return new { messages = CodesysOperations.GetIdeMessages(catParam) };
+
                 default:
                     throw new NotSupportedException($"Tool '{name}' is not recognized.");
             }
@@ -493,6 +497,19 @@ namespace CodesysMcp
                             name = new { type = "string", description = "Name of the POU to roll back" }
                         },
                         required = new[] { "name" }
+                    }
+                },
+                new
+                {
+                    name = "get_ide_messages",
+                    description = "Get messages from the CODESYS IDE Messages window (e.g. 'script message' category).",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            category = new { type = "string", description = "Optional message category GUID or name (defaults to 'script message' / '{194B48A9-AB51-43ae-B9A9-51D3EDAADDF3}')" }
+                        }
                     }
                 }
             };

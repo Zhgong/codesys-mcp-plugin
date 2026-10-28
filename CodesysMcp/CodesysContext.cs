@@ -89,7 +89,10 @@ namespace CodesysMcp
             });
         }
 
-        public static void LogToIde(string message, int severity = 3)
+        private static System.Reflection.MethodInfo _writeMessageMethod;
+        private static object _infoSeverityObj;
+
+        public static void LogToIde(string message, int severity = 8)
         {
             if (!HasSystem) return;
             try
@@ -98,21 +101,69 @@ namespace CodesysMcp
                 {
                     try
                     {
-                        dynamic sys = _rawSystem;
-                        sys.write_message(severity, "[CodesysMcp] " + message, null, 0, 0);
+                        if (_writeMessageMethod == null && _rawSystem != null)
+                        {
+                            foreach (var m in _rawSystem.GetType().GetMethods())
+                            {
+                                if (m.Name == "write_message" && m.GetParameters().Length == 5)
+                                {
+                                    _writeMessageMethod = m;
+                                    var sevType = m.GetParameters()[0].ParameterType;
+                                    try
+                                    {
+                                        _infoSeverityObj = Enum.ToObject(sevType, (uint)severity);
+                                    }
+                                    catch
+                                    {
+                                        _infoSeverityObj = Enum.ToObject(sevType, severity);
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (_writeMessageMethod != null)
+                        {
+                            var args = new object[] { _infoSeverityObj, "[CodesysMcp] " + message, null, 0L, (short)0 };
+                            _writeMessageMethod.Invoke(_rawSystem, args);
+                        }
                     }
                     catch
                     {
-                        try
-                        {
-                            dynamic sys = _rawSystem;
-                            sys.write_message("[CodesysMcp] " + message);
-                        }
-                        catch { }
                     }
                 });
             }
             catch { }
+        }
+
+        public static System.Collections.Generic.List<string> GetIdeMessages(string category = null)
+        {
+            var list = new System.Collections.Generic.List<string>();
+            if (!HasSystem) return list;
+            return RunOnPrimaryThread(() =>
+            {
+                try
+                {
+                    string catGuid = string.IsNullOrEmpty(category) || category.IndexOf("script", StringComparison.OrdinalIgnoreCase) >= 0
+                        ? "{194B48A9-AB51-43ae-B9A9-51D3EDAADDF3}"
+                        : category;
+
+                    var m = _rawSystem.GetType().GetMethod("get_messages", new Type[] { typeof(string) });
+                    if (m != null)
+                    {
+                        var res = m.Invoke(_rawSystem, new object[] { catGuid }) as System.Collections.IEnumerable;
+                        if (res != null)
+                        {
+                            foreach (var item in res)
+                            {
+                                if (item != null) list.Add(item.ToString());
+                            }
+                        }
+                    }
+                }
+                catch { }
+                return list;
+            });
         }
     }
 }

@@ -566,6 +566,11 @@ namespace CodesysMcp
             });
         }
 
+        public static List<string> GetIdeMessages(string category = null)
+        {
+            return CodesysContext.GetIdeMessages(category);
+        }
+
         public static List<SearchMatchItem> SearchInText(
             string text,
             string objName,

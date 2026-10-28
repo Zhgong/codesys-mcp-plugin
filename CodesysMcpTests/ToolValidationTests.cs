@@ -30,7 +30,7 @@ namespace CodesysMcpTests
 
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools, "tools array should not be null");
-            Assert.AreEqual(13, tools.Count, "Expected exactly 13 registered tools");
+            Assert.AreEqual(14, tools.Count, "Expected exactly 14 registered tools");
 
             var expectedTools = new HashSet<string>
             {
@@ -46,7 +46,8 @@ namespace CodesysMcpTests
                 "save_project",
                 "search_code",
                 "get_diff",
-                "rollback_pou"
+                "rollback_pou",
+                "get_ide_messages"
             };
 
             foreach (Dictionary<string, object> tool in tools)
@@ -215,6 +216,26 @@ namespace CodesysMcpTests
             var rollbackRes = json.Deserialize<Dictionary<string, object>>(firstItem["text"]?.ToString());
             Assert.IsFalse(Convert.ToBoolean(rollbackRes["success"]));
             Assert.AreEqual("none", rollbackRes["action"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestGetIdeMessagesWithoutSystemReturnsEmptyList()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 15, \"method\": \"tools/call\", \"params\": {\"name\": \"get_ide_messages\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsFalse(Convert.ToBoolean(result["isError"]));
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            var json = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var msgRes = json.Deserialize<Dictionary<string, object>>(firstItem["text"]?.ToString());
+            Assert.IsTrue(msgRes.ContainsKey("messages"));
+            var messages = msgRes["messages"] as ArrayList;
+            Assert.IsNotNull(messages);
+            Assert.AreEqual(0, messages.Count);
         }
     }
 }
