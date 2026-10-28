@@ -318,6 +318,13 @@ namespace CodesysMcp
                     string catParam = args.ContainsKey("category") ? args["category"]?.ToString() : null;
                     return new { messages = CodesysOperations.GetIdeMessages(catParam) };
 
+                case "preview_diff":
+                case "open_diff_viewer":
+                    string pTarget = args.ContainsKey("name") ? args["name"]?.ToString() : null;
+                    string pViewer = args.ContainsKey("viewer") ? args["viewer"]?.ToString() : "vscode";
+                    string pOutDir = args.ContainsKey("output_dir") ? args["output_dir"]?.ToString() : null;
+                    return CodesysOperations.PreviewDiff(pTarget, pViewer, pOutDir);
+
                 default:
                     throw new NotSupportedException($"Tool '{name}' is not recognized.");
             }
@@ -509,6 +516,21 @@ namespace CodesysMcp
                         properties = new
                         {
                             category = new { type = "string", description = "Optional message category GUID or name (defaults to 'script message' / '{194B48A9-AB51-43ae-B9A9-51D3EDAADDF3}')" }
+                        }
+                    }
+                },
+                new
+                {
+                    name = "preview_diff",
+                    description = "Export modified POUs to .diff_preview/ and launch a visual diff viewer (e.g. VS Code 'code --diff' or standalone HTML report).",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            name = new { type = "string", description = "Optional POU name to preview. If omitted, exports all modified POUs in the current session." },
+                            viewer = new { type = "string", description = "Diff viewer to launch: 'vscode' (default), 'browser', 'auto', or 'none'", @enum = new[] { "vscode", "browser", "auto", "none" } },
+                            output_dir = new { type = "string", description = "Optional custom output directory to export before/after files (defaults to <project>/.diff_preview)" }
                         }
                     }
                 }

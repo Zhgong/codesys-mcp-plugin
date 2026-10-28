@@ -30,7 +30,7 @@ namespace CodesysMcpTests
 
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools, "tools array should not be null");
-            Assert.AreEqual(14, tools.Count, "Expected exactly 14 registered tools");
+            Assert.AreEqual(15, tools.Count, "Expected exactly 15 registered tools");
 
             var expectedTools = new HashSet<string>
             {
@@ -47,7 +47,8 @@ namespace CodesysMcpTests
                 "search_code",
                 "get_diff",
                 "rollback_pou",
-                "get_ide_messages"
+                "get_ide_messages",
+                "preview_diff"
             };
 
             foreach (Dictionary<string, object> tool in tools)
@@ -236,6 +237,26 @@ namespace CodesysMcpTests
             var messages = msgRes["messages"] as ArrayList;
             Assert.IsNotNull(messages);
             Assert.AreEqual(0, messages.Count);
+        }
+
+        [TestMethod]
+        public void TestPreviewDiffWithoutModificationsReturnsCleanMessage()
+        {
+            CodesysOperations.ClearSnapshotsForTesting();
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 16, \"method\": \"tools/call\", \"params\": {\"name\": \"preview_diff\", \"arguments\": {\"viewer\": \"none\"}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsFalse(Convert.ToBoolean(result["isError"]));
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            var json = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var prevRes = json.Deserialize<Dictionary<string, object>>(firstItem["text"]?.ToString());
+            Assert.IsTrue(Convert.ToBoolean(prevRes["success"]));
+            Assert.AreEqual(0, Convert.ToInt32(prevRes["modifiedCount"]));
+            Assert.IsTrue(prevRes["message"] != null && prevRes["message"].ToString().Contains("No modified POUs"));
         }
     }
 }

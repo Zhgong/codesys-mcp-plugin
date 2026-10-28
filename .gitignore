@@ -13,3 +13,4 @@ bin/Release/*_*CodesysMcp.dll
 .vs/
 *.user
 *.suo
+.diff_preview/

@@ -67,6 +67,7 @@ namespace CodesysMcp
         public string OriginalDeclaration { get; set; }
         public string OriginalImplementation { get; set; }
         public bool ExistedBefore { get; set; }
+        public bool IsNew => !ExistedBefore;
         public bool IsDeleted { get; set; }
         public DateTime CreatedAt { get; set; }
     }
@@ -92,6 +93,18 @@ namespace CodesysMcp
         public string name { get; set; }
         public bool success { get; set; }
         public string action { get; set; } // "reverted", "deleted", "restored", "none"
+        public string message { get; set; }
+    }
+
+    public class PreviewDiffResult
+    {
+        public bool success { get; set; }
+        public int modifiedCount { get; set; }
+        public string viewer { get; set; }
+        public string exportDir { get; set; }
+        public string reportHtml { get; set; }
+        public List<string> exportedPous { get; set; } = new List<string>();
+        public string launchedCommand { get; set; }
         public string message { get; set; }
     }
 
@@ -953,6 +966,88 @@ namespace CodesysMcp
                     action = snap.IsDeleted ? "restored" : "reverted",
                     message = $"POU '{name}' has been successfully restored to its baseline snapshot."
                 };
+            });
+        }
+
+        public static PreviewDiffResult PreviewDiff(string name = null, string viewer = "vscode", string outputDir = null)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var diffResult = GetDiff(name);
+                var res = new PreviewDiffResult
+                {
+                    modifiedCount = diffResult.modifiedCount,
+                    viewer = viewer ?? "vscode"
+                };
+
+                if (diffResult.modifiedCount == 0)
+                {
+                    res.success = true;
+                    res.message = "No modified POUs in the current session to preview.";
+                    return res;
+                }
+
+                if (string.IsNullOrEmpty(outputDir))
+                {
+                    string projDir = null;
+                    if (CodesysContext.PrimaryProject != null && !string.IsNullOrEmpty(CodesysContext.PrimaryProject.path))
+                    {
+                        projDir = Path.GetDirectoryName(CodesysContext.PrimaryProject.path);
+                    }
+                    if (string.IsNullOrEmpty(projDir))
+                    {
+                        projDir = Environment.CurrentDirectory;
+                    }
+                    outputDir = Path.Combine(projDir, ".diff_preview");
+                }
+
+                res.exportDir = outputDir;
+
+                var exportedFiles = DiffViewerHelper.ExportDiffFiles(outputDir, _snapshots, pouName =>
+                {
+                    try
+                    {
+                        var pouData = ReadPou(pouName);
+                        return (pouData.declaration, pouData.implementation);
+                    }
+                    catch
+                    {
+                        return (null, null);
+                    }
+                }, name);
+
+                foreach (var exp in exportedFiles)
+                {
+                    res.exportedPous.Add(exp.PouName);
+                }
+
+                res.reportHtml = DiffViewerHelper.GenerateHtmlDiffReport(outputDir, diffResult.diffs);
+
+                bool vscodeOk = false;
+                string cmd = null;
+
+                if (exportedFiles.Count > 0 && (viewer == "vscode" || viewer == "auto"))
+                {
+                    var primary = exportedFiles[0];
+                    vscodeOk = DiffViewerHelper.LaunchVsCodeDiff(primary.BeforeFilePath, primary.AfterFilePath, out cmd);
+                    if (vscodeOk)
+                    {
+                        res.launchedCommand = cmd;
+                    }
+                }
+
+                if (viewer == "browser" || !vscodeOk || exportedFiles.Count > 1)
+                {
+                    DiffViewerHelper.LaunchBrowserReport(res.reportHtml);
+                }
+
+                res.success = true;
+                res.message = vscodeOk
+                    ? $"Exported {exportedFiles.Count} POU(s) to '{outputDir}'. Launched VS Code diff ({res.launchedCommand})."
+                    : $"Exported {exportedFiles.Count} POU(s) to '{outputDir}'. Opened HTML diff report.";
+
+                CodesysContext.LogToIde($"preview_diff: Exported {exportedFiles.Count} POU(s) to '{outputDir}'");
+                return res;
             });
         }
     }
