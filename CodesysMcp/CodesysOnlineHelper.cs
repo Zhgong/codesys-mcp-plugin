@@ -91,19 +91,16 @@ namespace CodesysMcp
                 var appExt = CodesysOperations.FindObjectByName(appName);
                 if (appExt != null)
                 {
-                    var baseObjProp = appExt.GetType().GetProperty("BaseObject");
-                    appObj = baseObjProp?.GetValue(appExt, null) ?? appExt;
+                    appObj = CodesysOperations.GetExtension<_3S.CoDeSys.ScriptEngine.BasicFunctionality.IScriptApplication>(appExt);
                 }
             }
 
             if (appObj == null)
             {
-                var activeAppProp = proj.GetType().GetProperty("active_application");
-                var activeExt = activeAppProp?.GetValue(proj, null);
-                if (activeExt != null)
+                var activeAppExt = proj.active_application;
+                if (activeAppExt != null)
                 {
-                    var baseObjProp = activeExt.GetType().GetProperty("BaseObject");
-                    appObj = baseObjProp?.GetValue(activeExt, null) ?? activeExt;
+                    appObj = CodesysOperations.GetExtension<_3S.CoDeSys.ScriptEngine.BasicFunctionality.IScriptApplication>(activeAppExt);
                 }
             }
 
@@ -392,34 +389,28 @@ namespace CodesysMcp
                 var proj = CodesysContext.PrimaryProject;
                 if (proj == null) throw new InvalidOperationException("No active project open.");
 
-                object appObj = null;
+                _3S.CoDeSys.ScriptEngine.BasicFunctionality.IScriptApplication app = null;
                 if (!string.IsNullOrEmpty(appName))
                 {
                     var ext = CodesysOperations.FindObjectByName(appName);
                     if (ext != null)
                     {
-                        var prop = ext.GetType().GetProperty("BaseObject");
-                        appObj = prop?.GetValue(ext, null) ?? ext;
+                        app = CodesysOperations.GetExtension<_3S.CoDeSys.ScriptEngine.BasicFunctionality.IScriptApplication>(ext);
                     }
                 }
 
-                if (appObj == null)
+                if (app == null)
                 {
-                    var activeAppProp = proj.GetType().GetProperty("active_application");
-                    var ext = activeAppProp?.GetValue(proj, null);
-                    if (ext != null)
+                    var activeAppExt = proj.active_application;
+                    if (activeAppExt != null)
                     {
-                        var prop = ext.GetType().GetProperty("BaseObject");
-                        appObj = prop?.GetValue(ext, null) ?? ext;
+                        app = CodesysOperations.GetExtension<_3S.CoDeSys.ScriptEngine.BasicFunctionality.IScriptApplication>(activeAppExt);
                     }
                 }
 
-                if (appObj == null) throw new InvalidOperationException("Could not resolve active application to create boot project.");
+                if (app == null) throw new InvalidOperationException("Could not resolve active application to create boot project.");
 
-                var createBootMethod = appObj.GetType().GetMethod("create_boot_application");
-                if (createBootMethod == null) throw new InvalidOperationException("Method 'create_boot_application' not found on application object.");
-
-                createBootMethod.Invoke(appObj, null);
+                app.create_boot_application();
                 CodesysContext.LogToIde("create_boot_application: Successfully created boot project for application");
                 return "Boot application created successfully.";
             });
