@@ -54,8 +54,6 @@ try:
     log("Loading CodesysMcp.dll from shadow copy: " + LOAD_PATH)
     clr.AddReferenceToFileAndPath(LOAD_PATH)
 
-    import CodesysMcp
-
     pipe_name = os.environ.get("CODESYS_MCP_PIPE", "codesys_mcp_pipe")
 
     online_obj = None
@@ -64,8 +62,15 @@ try:
     except NameError:
         pass
 
-    log("Starting C# Stdio/Pipe MCP Server on pipe: %s..." % pipe_name)
-    CodesysMcp.ServerBootstrap.Start(projects, system, online_obj, pipe_name)
+    log("Starting C# Stdio/Pipe MCP Server on pipe: %s via direct assembly load..." % pipe_name)
+    import System
+    import System.Reflection
+    asm = System.Reflection.Assembly.LoadFrom(LOAD_PATH)
+    bootstrap_type = asm.GetType("CodesysMcp.ServerBootstrap")
+    param_types = System.Array[System.Type]([System.Object, System.Object, System.Object, System.String])
+    start_method = bootstrap_type.GetMethod("Start", param_types)
+    param_values = System.Array[System.Object]([projects, system, online_obj, pipe_name])
+    start_method.Invoke(None, param_values)
     log("C# Native Pipe MCP Server is live!")
 
     ui_present = False

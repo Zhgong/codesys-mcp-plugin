@@ -198,7 +198,7 @@ namespace CodesysMcpTests
             Assert.IsTrue(names.Contains("read_struct"));
             Assert.IsTrue(names.Contains("read_array"));
             Assert.IsTrue(names.Contains("get_ui_indicator_status"));
-            Assert.IsTrue(names.Contains("capture_and_analyze_trace"));
+            Assert.IsTrue(names.Contains("analyze_trace"));
             Assert.IsTrue(names.Contains("setup_plc_logger"));
             Assert.IsTrue(names.Contains("read_plc_logs"));
         }

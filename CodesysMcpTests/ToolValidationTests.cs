@@ -64,7 +64,7 @@ namespace CodesysMcpTests
                 "read_struct",
                 "read_array",
                 "get_ui_indicator_status",
-                "capture_and_analyze_trace",
+                "analyze_trace",
                 "setup_plc_logger",
                 "read_plc_logs"
             };
