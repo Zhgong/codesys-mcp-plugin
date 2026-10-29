@@ -75,8 +75,98 @@ namespace CodesysMcp
             return null;
         }
 
+        public static string EnsureExecutionStack()
+        {
+            if (CodesysContext.Online == null) return "Online object is null";
+            try
+            {
+                var onlineType = CodesysContext.Online.GetType();
+                var stackField = onlineType.GetField("_executionStack", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (stackField == null) return "No _executionStack field on " + onlineType.FullName;
+
+                var stackObj = stackField.GetValue(CodesysContext.Online);
+                if (stackObj == null) return "_executionStack value is null";
+
+                var countProp = stackObj.GetType().GetProperty("Count");
+                int count = countProp != null ? Convert.ToInt32(countProp.GetValue(stackObj, null)) : -1;
+                if (count > 0)
+                {
+                    try
+                    {
+                        var peekMethod = stackObj.GetType().GetMethod("Peek");
+                        var currentTop = peekMethod?.Invoke(stackObj, null);
+                        if (currentTop != null)
+                        {
+                            AppDomain.CurrentDomain.SetData("CodesysMcp_ExecArgs", currentTop);
+                        }
+                    }
+                    catch { }
+                    return $"_executionStack Count={count}";
+                }
+
+                if (count == 0)
+                {
+                    var pushMethod = stackObj.GetType().GetMethod("Push");
+                    if (pushMethod != null)
+                    {
+                        var argType = pushMethod.GetParameters()[0].ParameterType;
+                        object dummyArgs = AppDomain.CurrentDomain.GetData("CodesysMcp_ExecArgs");
+
+                        if (dummyArgs == null)
+                        {
+                            // Find concrete subclass of ScriptExecutionEventArgs in loaded assemblies
+                            Type concreteType = null;
+                            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                            {
+                                try
+                                {
+                                    foreach (var t in asm.GetTypes())
+                                    {
+                                        if (!t.IsAbstract && !t.IsInterface && argType.IsAssignableFrom(t))
+                                        {
+                                            concreteType = t;
+                                            break;
+                                        }
+                                    }
+                                    if (concreteType != null) break;
+                                }
+                                catch { }
+                            }
+
+                            if (concreteType != null)
+                            {
+                                try
+                                {
+                                    dummyArgs = Activator.CreateInstance(concreteType, true);
+                                }
+                                catch
+                                {
+                                    dummyArgs = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(concreteType);
+                                }
+                            }
+                        }
+
+                        if (dummyArgs != null)
+                        {
+                            AppDomain.CurrentDomain.SetData("CodesysMcp_ExecArgs", dummyArgs);
+                            pushMethod.Invoke(stackObj, new object[] { dummyArgs });
+                            return $"Pushed {dummyArgs.GetType().FullName} onto _executionStack (Count=1)";
+                        }
+                        return $"Could not find concrete type for {argType.FullName}";
+                    }
+                }
+                return $"_executionStack Count={count}";
+            }
+            catch (Exception ex)
+            {
+                return "EnsureExecutionStack error: " + (ex.InnerException?.Message ?? ex.Message);
+            }
+        }
+
         private static object GetOrCreateOnlineApp(string appName = null)
         {
+            EnsureExecutionStack();
+
             if (_cachedOnlineApp != null)
             {
                 try
@@ -114,29 +204,46 @@ namespace CodesysMcp
                     throw new FileNotFoundException($"Application object '{appName}' not found in active project.");
                 }
             }
-            // Note: If appName is null/empty, we leave appTarget = null so CODESYS automatically targets the active application.
+            else
+            {
+                try
+                {
+                    var activeAppProp = proj.GetType().GetProperty("active_application");
+                    appTarget = activeAppProp?.GetValue(proj, null);
+                }
+                catch { }
+            }
 
-            MethodInfo createOnlineAppMethod = null;
+            MethodInfo createZeroArg = null;
+            MethodInfo createOneArg = null;
             foreach (var m in CodesysContext.Online.GetType().GetMethods())
             {
                 if (m.Name == "create_online_application")
                 {
-                    createOnlineAppMethod = m;
-                    break;
+                    int len = m.GetParameters().Length;
+                    if (len == 0) createZeroArg = m;
+                    else if (len == 1) createOneArg = m;
                 }
             }
 
-            if (createOnlineAppMethod == null)
-            {
-                throw new InvalidOperationException("Method 'create_online_application' not found on CODESYS online object.");
-            }
-
-            var pCount = createOnlineAppMethod.GetParameters().Length;
-            object[] callArgs = pCount >= 1 ? new object[] { appTarget } : new object[0];
-
             try
             {
-                _cachedOnlineApp = createOnlineAppMethod.Invoke(CodesysContext.Online, callArgs);
+                if (appTarget != null && createOneArg != null)
+                {
+                    _cachedOnlineApp = createOneArg.Invoke(CodesysContext.Online, new object[] { appTarget });
+                }
+                else if (createZeroArg != null)
+                {
+                    _cachedOnlineApp = createZeroArg.Invoke(CodesysContext.Online, new object[0]);
+                }
+                else if (createOneArg != null)
+                {
+                    _cachedOnlineApp = createOneArg.Invoke(CodesysContext.Online, new object[] { appTarget });
+                }
+                else
+                {
+                    throw new InvalidOperationException("Method 'create_online_application' not found on CODESYS online object.");
+                }
             }
             catch (TargetInvocationException ex)
             {
@@ -196,10 +303,29 @@ namespace CodesysMcp
             });
         }
 
-        public static OnlineStatusResult PlcLogin(string mode = "try_online_change", bool deleteForeignApps = true, string appName = null)
+        public static OnlineStatusResult PlcLogin(string mode = "try_online_change", bool deleteForeignApps = true, string appName = null, string username = null, string password = null)
         {
             return CodesysContext.RunOnPrimaryThread(() =>
             {
+                string user = !string.IsNullOrEmpty(username) ? username : Environment.GetEnvironmentVariable("CODESYS_DEVICE_USER");
+                string pass = password ?? Environment.GetEnvironmentVariable("CODESYS_DEVICE_PASSWORD");
+                if (!string.IsNullOrEmpty(user) && CodesysContext.Online != null)
+                {
+                    try
+                    {
+                        var setCredMethod = CodesysContext.Online.GetType().GetMethod("set_default_credentials", new Type[] { typeof(string), typeof(string) });
+                        if (setCredMethod != null)
+                        {
+                            setCredMethod.Invoke(CodesysContext.Online, new object[] { user, pass ?? string.Empty });
+                            CodesysContext.LogToIde($"[INFO] plc_login: Applied device credentials for user '{user}' via online.set_default_credentials.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        CodesysContext.LogToIde($"[WARNING] plc_login: set_default_credentials failed: {ex.Message}");
+                    }
+                }
+
                 var onlineApp = GetOrCreateOnlineApp(appName);
                 var loginMethod = onlineApp.GetType().GetMethod("login");
                 if (loginMethod == null)
@@ -234,7 +360,9 @@ namespace CodesysMcp
 
                 try
                 {
+                    CodesysContext.LogToIde($"[STEP] plc_login: Calling login({changeOptionObj}, deleteForeignApps={deleteForeignApps}) on Thread={System.Threading.Thread.CurrentThread.ManagedThreadId} (Apartment={System.Threading.Thread.CurrentThread.GetApartmentState()})...");
                     loginMethod.Invoke(onlineApp, loginArgs);
+                    CodesysContext.LogToIde($"[STEP] plc_login: loginMethod.Invoke returned! Querying status...");
                     var status = GetOnlineStatus();
                     if (status.isLoggedIn)
                     {
@@ -281,14 +409,22 @@ namespace CodesysMcp
                 string act = action.Trim().ToLowerInvariant();
                 if (act == "start")
                 {
-                    var startMethod = onlineApp.GetType().GetMethod("start");
-                    startMethod?.Invoke(onlineApp, null);
+                    var curState = GetMemberValue(onlineApp, "application_state")?.ToString() ?? "";
+                    if (!string.Equals(curState, "run", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var startMethod = onlineApp.GetType().GetMethod("start");
+                        startMethod?.Invoke(onlineApp, null);
+                    }
                     CodesysContext.LogToIde("plc_control: Started PLC execution (RUN)");
                 }
                 else if (act == "stop")
                 {
-                    var stopMethod = onlineApp.GetType().GetMethod("stop");
-                    stopMethod?.Invoke(onlineApp, null);
+                    var curState = GetMemberValue(onlineApp, "application_state")?.ToString() ?? "";
+                    if (!string.Equals(curState, "stop", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var stopMethod = onlineApp.GetType().GetMethod("stop");
+                        stopMethod?.Invoke(onlineApp, null);
+                    }
                     CodesysContext.LogToIde("plc_control: Stopped PLC execution (STOP)");
                 }
                 else if (act == "reset")
@@ -297,11 +433,19 @@ namespace CodesysMcp
                     if (resetMethod != null)
                     {
                         var p = resetMethod.GetParameters();
-                        if (p.Length == 0) resetMethod.Invoke(onlineApp, null);
-                        else
+                        if (p.Length == 0)
+                        {
+                            resetMethod.Invoke(onlineApp, null);
+                        }
+                        else if (p.Length == 1)
                         {
                             object resetOpt = Enum.ToObject(p[0].ParameterType, 0);
                             resetMethod.Invoke(onlineApp, new object[] { resetOpt });
+                        }
+                        else if (p.Length == 2)
+                        {
+                            object resetOpt = Enum.ToObject(p[0].ParameterType, 0);
+                            resetMethod.Invoke(onlineApp, new object[] { resetOpt, false });
                         }
                     }
                     CodesysContext.LogToIde("plc_control: Reset PLC application");
@@ -385,9 +529,22 @@ namespace CodesysMcp
                     actual = readValMethod?.Invoke(onlineApp, new object[] { name })?.ToString();
                     if (actual != null)
                     {
-                        verified = string.Equals(actual.Trim(), value?.Trim(), StringComparison.OrdinalIgnoreCase) ||
-                                   (double.TryParse(actual, out var d1) && double.TryParse(value, out var d2) && Math.Abs(d1 - d2) < 0.0001) ||
-                                   (bool.TryParse(actual, out var b1) && bool.TryParse(value, out var b2) && b1 == b2);
+                        string normActual = actual.Trim();
+                        if (normActual.Contains("#"))
+                        {
+                            normActual = normActual.Substring(normActual.IndexOf('#') + 1).Trim();
+                        }
+                        string normTarget = (value ?? string.Empty).Trim();
+                        if (normTarget.Contains("#"))
+                        {
+                            normTarget = normTarget.Substring(normTarget.IndexOf('#') + 1).Trim();
+                        }
+
+                        verified = string.Equals(normActual, normTarget, StringComparison.OrdinalIgnoreCase) ||
+                                   (double.TryParse(normActual, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d1) &&
+                                    double.TryParse(normTarget, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2) &&
+                                    Math.Abs(d1 - d2) < 0.001) ||
+                                   (bool.TryParse(normActual, out var b1) && bool.TryParse(normTarget, out var b2) && b1 == b2);
                     }
                 }
                 catch { }

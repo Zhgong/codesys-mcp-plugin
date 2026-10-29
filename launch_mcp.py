@@ -1,5 +1,6 @@
 """
 Reliable launcher for CODESYS Native MCP Server using Pure Named Pipe (No HTTP).
+Supports Interactive GUI mode (default, unlocked IDE) and Headless (--headless) mode.
 """
 import subprocess
 import os
@@ -17,13 +18,20 @@ PROFILE = "CODESYS V3.5 SP20 Patch 5"
 SCRIPT_PATH = os.path.join(ROOT_DIR, "codesys_mcp_session.py")
 PIPE_PATH = r"\\.\pipe\codesys_mcp_pipe"
 
-cmd_str = f'"{CODESYS_EXE}" --profile="{PROFILE}" --runscript="{SCRIPT_PATH}" --noUI'
+headless = "--headless" in sys.argv or "--noUI" in sys.argv
+default_proj = r"C:\Users\vboxuser\Desktop\Repos\agy-codesys\projects\servo_press\ServoPress_VirtualAxis.project"
+if "CODESYS_MCP_PROJECT" not in os.environ and os.path.exists(default_proj):
+    os.environ["CODESYS_MCP_PROJECT"] = default_proj
 
-print("[LAUNCHER] Launching CODESYS with C# Pure Stdio/Pipe MCP session...")
+cmd_str = f'"{CODESYS_EXE}" --profile="{PROFILE}" --runscript="{SCRIPT_PATH}"'
+if headless:
+    cmd_str += " --noUI"
+
+print(f"[LAUNCHER] Launching CODESYS ({'Headless --noUI' if headless else 'Interactive GUI Mode'})...")
 print("[LAUNCHER] Command:", cmd_str)
 
 proc = subprocess.Popen(cmd_str, shell=False)
-print(f"[LAUNCHER] CODESYS started (PID: {proc.pid}). Waiting for pipe: {PIPE_PATH}...")
+print(f"[LAUNCHER] CODESYS started (PID: {proc.pid}). Waiting for pipe: {PIPE_PATH}...", flush=True)
 
 connected = False
 for i in range(90):
@@ -39,12 +47,12 @@ for i in range(90):
         print(f"[LAUNCHER] Still waiting for CODESYS initialization... ({i+1}s)", flush=True)
 
 if not connected:
-    print("[LAUNCHER] Timed out waiting for named pipe.")
+    print("[LAUNCHER] Timed out waiting for named pipe.", flush=True)
     sys.exit(1)
 
-print("[LAUNCHER] CODESYS Stdio/Pipe MCP Server is running! Press Ctrl+C to terminate.")
+print("[LAUNCHER] CODESYS Stdio/Pipe MCP Server is running! Keeping launcher alive...", flush=True)
 try:
     proc.wait()
 except KeyboardInterrupt:
-    print("[LAUNCHER] Stopping CODESYS...")
+    print("[LAUNCHER] Stopping CODESYS...", flush=True)
     proc.terminate()

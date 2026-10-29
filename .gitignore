@@ -10,6 +10,7 @@ CodesysMcpCli/bin/
 CodesysMcpCli/obj/
 *Tests.exe
 bin/Release/*_*CodesysMcp.dll
+bin/Release/shadow/
 .vs/
 *.user
 *.suo

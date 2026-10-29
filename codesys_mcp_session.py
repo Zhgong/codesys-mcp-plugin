@@ -1,9 +1,11 @@
 """
 CODESYS Native MCP Session Bootstrap (IronPython 2.7)
-Supports both Headless (--noUI) and Interactive CODESYS IDE modes.
+One-shot (<50ms) bootstrap loader that starts the C# NamedPipe MCP Server
+and exits immediately in GUI mode so the CODESYS IDE remains 100% interactive.
 """
 import clr
 import os
+import shutil
 import sys
 import time
 import traceback
@@ -34,8 +36,23 @@ try:
         log("Error: DLL not found at " + DLL_PATH)
         sys.exit(1)
 
-    log("Loading CodesysMcp.dll from: " + DLL_PATH)
-    clr.AddReferenceToFileAndPath(DLL_PATH)
+    # Load from a shadow copy so bin/Release/CodesysMcp.dll is NEVER locked on disk by CODESYS.exe
+    SHADOW_DIR = os.path.join(os.path.dirname(DLL_PATH), "shadow")
+    if not os.path.exists(SHADOW_DIR):
+        try:
+            os.makedirs(SHADOW_DIR)
+        except:
+            pass
+
+    SHADOW_DLL = os.path.join(SHADOW_DIR, "CodesysMcp_%d.dll" % int(time.time() * 1000))
+    try:
+        shutil.copyfile(DLL_PATH, SHADOW_DLL)
+        LOAD_PATH = SHADOW_DLL
+    except Exception:
+        LOAD_PATH = DLL_PATH
+
+    log("Loading CodesysMcp.dll from shadow copy: " + LOAD_PATH)
+    clr.AddReferenceToFileAndPath(LOAD_PATH)
 
     import CodesysMcp
 
@@ -51,7 +68,6 @@ try:
     CodesysMcp.ServerBootstrap.Start(projects, system, online_obj, pipe_name)
     log("C# Native Pipe MCP Server is live!")
 
-    # Check if UI is present (Interactive IDE mode vs Headless --noUI mode)
     ui_present = False
     try:
         ui_present = bool(system.ui_present)
@@ -60,7 +76,7 @@ try:
 
     log("system.ui_present = %s" % ui_present)
 
-    # Suppress modal prompt dialogs during automated script operations
+    # Suppress modal prompt dialogs during automated operations
     try:
         from _3S.CoDeSys.ScriptEngine.BasicFunctionality import PromptHandling
         system.prompt_handling = PromptHandling.NONE
@@ -87,20 +103,22 @@ try:
     try:
         system.write_message(
             Severity.Information,
-            "[CODESYS MCP] Native Stdio/Pipe MCP Server started on \\\\.\\pipe\\%s" % pipe_name
+            "[CODESYS MCP] Native Stdio/Pipe MCP Server started on \\\\.\\pipe\\%s (GUI Unlocked)" % pipe_name
         )
     except:
         pass
 
-    log("Entering MCP main dispatch loop (processing primary thread queue)...")
-    while True:
-        try:
-            CodesysMcp.CodesysContext.ProcessQueue(20)
-            system.delay(50)
-        except Exception:
-            time.sleep(0.05)
+    if ui_present:
+        log("GUI mode active: Exiting bootstrap script immediately so CODESYS IDE remains 100% unlocked!")
+    else:
+        log("Headless (--noUI) mode active: Entering primary thread queue loop...")
+        while True:
+            try:
+                CodesysMcp.CodesysContext.ProcessQueue(20)
+                system.delay(50)
+            except Exception:
+                time.sleep(0.05)
 except Exception as e:
     log("FATAL ERROR: " + str(e))
     log(traceback.format_exc())
     raise
-

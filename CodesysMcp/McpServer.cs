@@ -40,7 +40,16 @@ namespace CodesysMcp
 
         public void Stop()
         {
+            if (!_isRunning) return;
             _isRunning = false;
+            try
+            {
+                using (var wake = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut))
+                {
+                    wake.Connect(100);
+                }
+            }
+            catch { }
             Console.WriteLine("[CodesysMcp] Pipe Server stopped.");
         }
 
@@ -59,6 +68,11 @@ namespace CodesysMcp
                         PipeOptions.None);
 
                     server.WaitForConnection();
+                    if (!_isRunning)
+                    {
+                        try { server.Dispose(); } catch { }
+                        break;
+                    }
 
                     var clientThread = new Thread(ProcessClientConnection)
                     {
@@ -228,7 +242,8 @@ namespace CodesysMcp
                     {
                         ex = ex.InnerException;
                     }
-                    CodesysContext.LogToIde($"[ERROR] MCP Tool '{toolName}' failed: {ex.Message}");
+                    string stackDiag = CodesysOnlineHelper.EnsureExecutionStack();
+                    CodesysContext.LogToIde($"[ERROR] MCP Tool '{toolName}' failed: {ex.Message} | StackDiag: {stackDiag} | Trace: {ex.StackTrace}");
                     return new
                     {
                         jsonrpc = "2.0",
@@ -237,7 +252,7 @@ namespace CodesysMcp
                         {
                             content = new[]
                             {
-                                new { type = "text", text = "Error executing tool: " + ex.Message }
+                                new { type = "text", text = $"Error executing tool: {ex.Message} [Diag: {stackDiag}] [StackTrace: {ex.StackTrace}]" }
                             },
                             isError = true
                         }
@@ -342,7 +357,9 @@ namespace CodesysMcp
                     string loginMode = args.ContainsKey("mode") ? args["mode"]?.ToString() : "try_online_change";
                     string loginApp = args.ContainsKey("app_name") ? args["app_name"]?.ToString() : null;
                     bool delForeign = !args.ContainsKey("delete_foreign_apps") || Convert.ToBoolean(args["delete_foreign_apps"]);
-                    return CodesysOperations.PlcLogin(loginMode, delForeign, loginApp);
+                    string devUser = args.ContainsKey("username") ? args["username"]?.ToString() : null;
+                    string devPass = args.ContainsKey("password") ? args["password"]?.ToString() : null;
+                    return CodesysOperations.PlcLogin(loginMode, delForeign, loginApp, devUser, devPass);
 
                 case "plc_logout":
                     return CodesysOperations.PlcLogout();
@@ -387,6 +404,117 @@ namespace CodesysMcp
                         }
                     }
                     return CodesysOperations.UnforceVariables(unforceList);
+
+                case "diag_online":
+                    var formsInfo = new List<string>();
+                    try
+                    {
+                        foreach (System.Windows.Forms.Form f in System.Windows.Forms.Application.OpenForms)
+                        {
+                            var childTexts = new List<string>();
+                            void WalkControls(System.Windows.Forms.Control parent)
+                            {
+                                foreach (System.Windows.Forms.Control c in parent.Controls)
+                                {
+                                    childTexts.Add($"{c.GetType().Name}(Name='{c.Name}', Text='{c.Text}')");
+                                    if (c.HasChildren) WalkControls(c);
+                                }
+                            }
+                            if (f.GetType().Name != "MainForm")
+                            {
+                                try { WalkControls(f); } catch { }
+                                if (args.ContainsKey("cancel_dialog") && Convert.ToBoolean(args["cancel_dialog"]))
+                                {
+                                    f.BeginInvoke(new Action(() =>
+                                    {
+                                        try { f.DialogResult = System.Windows.Forms.DialogResult.Cancel; f.Close(); } catch { }
+                                    }));
+                                }
+                            }
+                            formsInfo.Add($"{f.GetType().FullName} (Text='{f.Text}', Visible={f.Visible}, Handle={f.IsHandleCreated}, InvokeReq={f.InvokeRequired}, Children=[{string.Join("; ", childTexts)}])");
+                        }
+                    }
+                    catch (Exception ex) { formsInfo.Add("OpenForms error: " + ex.Message); }
+
+                    var onlineMethods = new List<string>();
+                    if (CodesysContext.Online != null)
+                    {
+                        foreach (var m in CodesysContext.Online.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+                        {
+                            var ps = new List<string>();
+                            foreach (var p in m.GetParameters()) ps.Add($"{p.ParameterType.Name} {p.Name}");
+                            onlineMethods.Add($"{m.Name}({string.Join(", ", ps)})");
+                        }
+                    }
+
+                    string ffInfo = "null";
+                    try
+                    {
+                        var ff = _3S.CoDeSys.Core.SystemInstances.FrameForm;
+                        if (ff != null)
+                        {
+                            var props = new List<string>();
+                            foreach (var p in ff.GetType().GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                            {
+                                try { props.Add($"{p.Name}={p.GetValue(ff, null)}"); } catch { }
+                            }
+                            ffInfo = $"{ff.GetType().FullName} [{string.Join(", ", props)}]";
+                        }
+                    }
+                    catch (Exception ex) { ffInfo = "FrameForm error: " + ex.Message; }
+
+                    return new
+                    {
+                        pipeThreadId = Thread.CurrentThread.ManagedThreadId,
+                        pipeApartment = Thread.CurrentThread.GetApartmentState().ToString(),
+                        uiPresent = CodesysContext.System?.ui_present,
+                        openFormsCount = System.Windows.Forms.Application.OpenForms.Count,
+                        openForms = formsInfo,
+                        onlineMethods,
+                        frameForm = ffInfo,
+                        stackDiag = CodesysOnlineHelper.EnsureExecutionStack()
+                    };
+
+                case "hot_reload_dll":
+                    string dllPath = args.ContainsKey("dll_path") && !string.IsNullOrEmpty(args["dll_path"]?.ToString())
+                        ? args["dll_path"].ToString()
+                        : @"C:\Users\vboxuser\Desktop\Repos\codesys-plugin\bin\Release\CodesysMcp.dll";
+                    if (!File.Exists(dllPath))
+                        throw new FileNotFoundException($"DLL not found at '{dllPath}'");
+                    byte[] rawBytes = File.ReadAllBytes(dllPath);
+                    var newAsm = Assembly.Load(rawBytes);
+                    var bootstrapType = newAsm.GetType("CodesysMcp.ServerBootstrap");
+                    if (bootstrapType == null)
+                        throw new InvalidOperationException("CodesysMcp.ServerBootstrap not found in loaded assembly.");
+                    var startMethod = bootstrapType.GetMethod("Start", new Type[] { typeof(object), typeof(object), typeof(object), typeof(string) });
+                    if (startMethod == null)
+                        throw new InvalidOperationException("ServerBootstrap.Start(projects, system, online, pipeName) not found.");
+
+                    var projs = CodesysContext.Projects;
+                    var sys = CodesysContext.RawSystem;
+                    var onl = CodesysContext.Online;
+                    var pipe = _pipeName;
+
+                    ThreadPool.QueueUserWorkItem(_ =>
+                    {
+                        Thread.Sleep(150);
+                        try
+                        {
+                            ServerBootstrap.Stop();
+                            startMethod.Invoke(null, new object[] { projs, sys, onl, pipe });
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("[CodesysMcp] Hot reload failed: " + ex);
+                        }
+                    });
+                    return new
+                    {
+                        reloaded = true,
+                        dllPath,
+                        bytes = rawBytes.Length,
+                        timestamp = File.GetLastWriteTime(dllPath).ToString("yyyy-MM-dd HH:mm:ss")
+                    };
 
                 default:
                     throw new NotSupportedException($"Tool '{name}' is not recognized.");
@@ -631,7 +759,9 @@ namespace CodesysMcp
                         {
                             mode = new { type = "string", description = "Login mode: 'try_online_change' (default, safe hot-update), 'download' / 'never' (full download/stop), 'force_online_change', or 'login_only' / 'keep' (monitor only)", @enum = new[] { "try_online_change", "download", "force_online_change", "login_only" } },
                             delete_foreign_apps = new { type = "boolean", description = "If true (default), automatically replaces conflicting applications on the PLC without modal confirmation dialogs." },
-                            app_name = new { type = "string", description = "Optional target application name." }
+                            app_name = new { type = "string", description = "Optional target application name." },
+                            username = new { type = "string", description = "Optional PLC Device User Logon username (calls online.set_default_credentials to avoid Device User Logon modal popup)." },
+                            password = new { type = "string", description = "Optional PLC Device User Logon password." }
                         }
                     }
                 },

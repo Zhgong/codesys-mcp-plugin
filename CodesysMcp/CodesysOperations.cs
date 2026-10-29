@@ -1086,9 +1086,9 @@ namespace CodesysMcp
             return CodesysOnlineHelper.GetOnlineStatus();
         }
 
-        public static OnlineStatusResult PlcLogin(string mode = "try_online_change", bool deleteForeignApps = true, string appName = null)
+        public static OnlineStatusResult PlcLogin(string mode = "try_online_change", bool deleteForeignApps = true, string appName = null, string username = null, string password = null)
         {
-            return CodesysOnlineHelper.PlcLogin(mode, deleteForeignApps, appName);
+            return CodesysOnlineHelper.PlcLogin(mode, deleteForeignApps, appName, username, password);
         }
 
         public static OnlineStatusResult PlcLogout()
