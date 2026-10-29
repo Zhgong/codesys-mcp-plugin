@@ -27,6 +27,12 @@ namespace CodesysMcp
                 _server = new McpServer(pipeName ?? McpServer.DefaultPipeName);
                 _server.Start();
                 Console.WriteLine($"[CodesysMcp] Stdio MCP Named Pipe server ready on: {pipeName ?? McpServer.DefaultPipeName}");
+
+                try
+                {
+                    CodesysIdeUiHelper.InstallStatusIndicator(pipeName ?? McpServer.DefaultPipeName);
+                }
+                catch { }
             }
             catch (Exception ex)
             {
@@ -37,6 +43,12 @@ namespace CodesysMcp
 
         public static void Stop()
         {
+            try
+            {
+                CodesysIdeUiHelper.RemoveStatusIndicator();
+            }
+            catch { }
+
             if (_server != null)
             {
                 _server.Stop();

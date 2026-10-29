@@ -1315,5 +1315,10 @@ namespace CodesysMcp
                 };
             });
         }
+
+        public static UiIndicatorInfo GetUiIndicatorStatus()
+        {
+            return CodesysIdeUiHelper.GetIndicatorInfo();
+        }
     }
 }

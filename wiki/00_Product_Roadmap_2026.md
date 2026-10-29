@@ -58,13 +58,17 @@ flowchart LR
 - `read_struct`：DUT 语法树 AST 成员自动探测与 Tuple 双模提取。
 - `read_array`：IEC 数组区间切片批量读取与类型剥离。
 
-#### 2. IDE 视觉感知与状态指示器 (M2-C, 新增规划 - 2026/11)
-- **需求痛点**：当前 MCP Server 在后台静默运行，工程师在 CODESYS IDE 界面中无法直观感知服务是否已启动、命名管道是否正常、是否有 AI 客户端（如 Cursor / Claude）正在接入或下发指令。
-- **产品与架构设计**：
-  - **原生状态栏嵌入 (Status Bar Indicator)**：通过 `CodesysContext.RunOnPrimaryThread` 在主窗口底部的 `StatusStrip` 注入专用指示器项（绿灯 `● MCP: Ready` / 黄灯 `● MCP: Busy` / 灰灯 `○ MCP: Offline`）。
-  - **悬停 Tooltip 诊断卡片**：鼠标悬停显示状态看板（管道名称、已处理请求数、最近调用工具、最后报错信息）。
-  - **快捷上下文菜单 (Context Menu)**：右键/左键点击弹出运维选项（「复制管道路径」、「查看最近 IDE 日志」、「重启 MCP 服务」）。
-  - **零侵入与 Headless 兼容**：若在 `--noUI` 模式下启动，自动静默跳过 UI 控件挂载，确保 CI/CD 自动化不产生任何阻碍。
+#### 2. IDE 视觉感知与状态指示器 (M2-C, 阶段1已交付 - 2026/10)
+- **交付状态**：
+  - [x] **Phase 1: 原生状态栏嵌入与实时感知 (已完成)**
+    - `CodesysIdeUiHelper.cs`：动态接入 CODESYS `MainForm` 原生底栏 `_progressStatusStrip`（无原生底栏时自动创建轻量停靠面板）。
+    - 实时状态动态变色：`● MCP: Online`（ForestGreen）、`● MCP: Busy (<tool>)`（DarkOrange）、`○ MCP: Offline`（Gray）、`▲ MCP: Warning`（Crimson）。
+    - Tooltip 诊断悬停信息卡：实时显示服务器版本、命名管道地址、请求计数、当前运行工具与健康状态。
+    - 工具集成：发布 Tool #30 `get_ui_indicator_status`，支持客户端及 IDE 相互感知状态。
+    - 兼容性：100% 兼容 `--noUI` 模式（静默降级，不抛异常）。
+    - 验收：77/77 项单元与协议测试全部 PASS，Live SoftPLC 实时运行验证全部 PASS。
+  - [ ] **Phase 2: 交互菜单与运维弹窗 (规划中)**
+    - 状态徽章点击事件、弹出运维菜单（「复制管道地址」、「重启 MCP 服务」、「导出系统日志」）。
 
 #### 3. 调试与在线执行控制 (M2-B, 下一阶段)
 - **断点控制**：实现 `set_breakpoint`、`clear_breakpoint`、`toggle_breakpoint`。

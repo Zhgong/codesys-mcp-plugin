@@ -221,7 +221,9 @@ namespace CodesysMcp
 
                 try
                 {
+                    CodesysIdeUiHelper.UpdateStatus(McpServerStatus.Busy, toolName);
                     var toolOutput = ExecuteTool(toolName, arguments ?? new Dictionary<string, object>());
+                    CodesysIdeUiHelper.UpdateStatus(McpServerStatus.Online);
                     return new
                     {
                         jsonrpc = "2.0",
@@ -238,6 +240,7 @@ namespace CodesysMcp
                 }
                 catch (Exception ex)
                 {
+                    CodesysIdeUiHelper.UpdateStatus(McpServerStatus.Error, toolName, ex.Message);
                     while (ex is TargetInvocationException && ex.InnerException != null)
                     {
                         ex = ex.InnerException;
@@ -457,6 +460,9 @@ namespace CodesysMcp
                     int raStart = args.ContainsKey("start_index") ? Convert.ToInt32(args["start_index"]) : 0;
                     int raCount = args.ContainsKey("count") ? Convert.ToInt32(args["count"]) : 50;
                     return CodesysOperations.ReadArray(raVarName, raStart, raCount);
+
+                case "get_ui_indicator_status":
+                    return CodesysOperations.GetUiIndicatorStatus();
 
                 case "diag_online":
                     var formsInfo = new List<string>();
@@ -1095,6 +1101,16 @@ namespace CodesysMcp
                             count = new { type = "integer", description = "Number of elements to read (defaults to 50, max 1000)" }
                         },
                         required = new[] { "variable_name" }
+                    }
+                },
+                new
+                {
+                    name = "get_ui_indicator_status",
+                    description = "Query the current visual status, color, and diagnostic details of the CODESYS IDE status bar indicator.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new { }
                     }
                 }
             };

@@ -30,7 +30,7 @@ namespace CodesysMcpTests
 
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools, "tools array should not be null");
-            Assert.AreEqual(29, tools.Count, "Expected exactly 29 registered tools");
+            Assert.AreEqual(30, tools.Count, "Expected exactly 30 registered tools");
 
             var expectedTools = new HashSet<string>
             {
@@ -62,7 +62,8 @@ namespace CodesysMcpTests
                 "batch_write_variables",
                 "write_struct",
                 "read_struct",
-                "read_array"
+                "read_array",
+                "get_ui_indicator_status"
             };
 
             foreach (Dictionary<string, object> tool in tools)

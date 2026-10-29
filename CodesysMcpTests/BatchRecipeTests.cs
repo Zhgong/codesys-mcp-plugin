@@ -177,7 +177,7 @@ namespace CodesysMcpTests
         }
 
         [TestMethod]
-        public void TestToolsListReturnsAllTwentyNineTools()
+        public void TestToolsListReturnsAllThirtyTools()
         {
             var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 6, \"method\": \"tools/list\", \"params\": {}}");
             Assert.IsNotNull(res);
@@ -185,7 +185,7 @@ namespace CodesysMcpTests
             Assert.IsNotNull(result);
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools);
-            Assert.AreEqual(29, tools.Count);
+            Assert.AreEqual(30, tools.Count);
 
             var names = new List<string>();
             foreach (Dictionary<string, object> t in tools)
@@ -197,6 +197,7 @@ namespace CodesysMcpTests
             Assert.IsTrue(names.Contains("write_struct"));
             Assert.IsTrue(names.Contains("read_struct"));
             Assert.IsTrue(names.Contains("read_array"));
+            Assert.IsTrue(names.Contains("get_ui_indicator_status"));
         }
 
         [TestMethod]
