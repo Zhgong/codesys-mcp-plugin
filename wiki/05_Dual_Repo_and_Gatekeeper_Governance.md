@@ -54,7 +54,7 @@ flowchart TD
 - [`.publicignore`](file:///C:/Users/vboxuser/Desktop/Repos/codesys-plugin/.publicignore)：定义在开源版本中需要排除的目录（`wiki/`, `roadmap/`, `docs/internal/`, `api_keys.json`）。
 
 ### 3.2 物理拦截：Git `pre-push` Hook
-在 [`.git/hooks/pre-push`](file:///C:/Users/vboxuser/Desktop/Repos/codesys-plugin/.git/hooks/pre-push) 中植入前置拦截器。当检测到推送目标包含 `public` 时，强制在底层触发门禁检测：
+在 [`.githooks/pre-push`](file:///C:/Users/vboxuser/Desktop/Repos/codesys-plugin/.githooks/pre-push) 中植入前置拦截器。当检测到推送目标包含 `public` 时，强制在底层触发门禁检测：
 - **实测结果**：即使用户在命令行误敲 `git push public development`，底层的 Git Hook 也会直接拦截退出，返回 `[SECURITY GATE REJECTION]`，推不动代码。
 
 ---
@@ -77,3 +77,4 @@ powershell .\sync_to_public.ps1 -FilterIgnored
 3. 自动生成纯净发行 Commit，并运行 3 道安全门禁。
 4. 提示开发者交互式确认 `[y/N]`，推送至公开仓库的对应分支。
 5. 推送完成后自动切回开发者的原始分支，**私有分支中的内部文件丝毫未损**！
+
