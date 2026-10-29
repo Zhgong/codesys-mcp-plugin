@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Web.Script.Serialization;
+using System.Windows.Forms;
 using CodesysMcp;
 
 namespace CodesysMcpTests
@@ -79,6 +80,40 @@ namespace CodesysMcpTests
             Assert.IsTrue(parsed.ContainsKey("color"), "Payload must contain color");
             Assert.IsTrue(parsed.ContainsKey("totalRequests"), "Payload must contain totalRequests");
             Assert.IsTrue(parsed.ContainsKey("pipeName"), "Payload must contain pipeName");
+            Assert.IsTrue(parsed.ContainsKey("isPermanentlyVisible"), "Payload must contain isPermanentlyVisible");
+            Assert.IsTrue(parsed.ContainsKey("hostControlVisible"), "Payload must contain hostControlVisible");
+            Assert.IsTrue(parsed.ContainsKey("hasContextMenu"), "Payload must contain hasContextMenu");
+        }
+
+        [TestMethod]
+        public void TestCreateContextMenuItems()
+        {
+            var menu = CodesysIdeUiHelper.CreateContextMenu();
+            Assert.IsNotNull(menu, "Context menu should not be null");
+            Assert.IsTrue(menu.Items.Count >= 4, "Context menu should have at least 4 items");
+
+            var titles = new List<string>();
+            foreach (ToolStripItem it in menu.Items)
+            {
+                if (!string.IsNullOrEmpty(it.Text))
+                {
+                    titles.Add(it.Text);
+                }
+            }
+
+            Assert.IsTrue(titles.Exists(t => t.Contains("Copy")), "Menu must contain Copy item");
+            Assert.IsTrue(titles.Exists(t => t.Contains("Diagnostics")), "Menu must contain Diagnostics item");
+            Assert.IsTrue(titles.Exists(t => t.Contains("Log")), "Menu must contain Log item");
+            Assert.IsTrue(titles.Exists(t => t.Contains("Re-anchor")), "Menu must contain Re-anchor item");
+        }
+
+        [TestMethod]
+        public void TestEnsureIndicatorVisibleSafeInHeadless()
+        {
+            // Calling EnsureIndicatorVisible without WinForms host should not throw
+            CodesysIdeUiHelper.EnsureIndicatorVisible();
+            var info = CodesysIdeUiHelper.GetIndicatorInfo();
+            Assert.IsNotNull(info);
         }
 
         [TestMethod]

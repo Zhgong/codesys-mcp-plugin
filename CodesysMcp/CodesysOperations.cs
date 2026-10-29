@@ -239,7 +239,9 @@ namespace CodesysMcp
 
                 CodesysContext.Projects.open(projectPath);
                 _snapshots.Clear();
-                return GetProjectInfo();
+                var info = GetProjectInfo();
+                CodesysIdeUiHelper.EnsureIndicatorVisible();
+                return info;
             });
         }
 
@@ -251,6 +253,7 @@ namespace CodesysMcp
                 if (proj == null) return false;
                 proj.close();
                 _snapshots.Clear();
+                CodesysIdeUiHelper.EnsureIndicatorVisible();
                 return true;
             });
         }
