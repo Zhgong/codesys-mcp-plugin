@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Web.Script.Serialization;
@@ -30,7 +30,7 @@ namespace CodesysMcpTests
 
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools, "tools array should not be null");
-            Assert.AreEqual(30, tools.Count, "Expected exactly 30 registered tools");
+            Assert.AreEqual(33, tools.Count, "Expected exactly 33 registered tools");
 
             var expectedTools = new HashSet<string>
             {
@@ -63,7 +63,10 @@ namespace CodesysMcpTests
                 "write_struct",
                 "read_struct",
                 "read_array",
-                "get_ui_indicator_status"
+                "get_ui_indicator_status",
+                "capture_and_analyze_trace",
+                "setup_plc_logger",
+                "read_plc_logs"
             };
 
             foreach (Dictionary<string, object> tool in tools)

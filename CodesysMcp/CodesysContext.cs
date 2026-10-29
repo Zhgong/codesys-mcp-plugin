@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -89,6 +89,15 @@ namespace CodesysMcp
         {
             try
             {
+                if (SystemInstances.FrameForm is Control ctrl && !ctrl.IsDisposed && ctrl.IsHandleCreated)
+                {
+                    return ctrl;
+                }
+            }
+            catch { }
+
+            try
+            {
                 var openForms = Application.OpenForms;
                 if (openForms != null && openForms.Count > 0)
                 {
@@ -97,18 +106,22 @@ namespace CodesysMcp
                         var f = openForms[i];
                         if (f != null && !f.IsDisposed && f.IsHandleCreated)
                         {
+                            if (f.Text.IndexOf("CODESYS", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                f.GetType().Name == "MainForm")
+                            {
+                                return f;
+                            }
+                        }
+                    }
+
+                    for (int i = 0; i < openForms.Count; i++)
+                    {
+                        var f = openForms[i];
+                        if (f != null && !f.IsDisposed && f.IsHandleCreated)
+                        {
                             return f;
                         }
                     }
-                }
-            }
-            catch { }
-
-            try
-            {
-                if (SystemInstances.FrameForm is Control ctrl && !ctrl.IsDisposed && ctrl.IsHandleCreated)
-                {
-                    return ctrl;
                 }
             }
             catch { }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -1322,6 +1322,21 @@ namespace CodesysMcp
         public static UiIndicatorInfo GetUiIndicatorStatus()
         {
             return CodesysIdeUiHelper.GetIndicatorInfo();
+        }
+    
+        public static TraceAnalysisResult CaptureAndAnalyzeTrace(string traceName = "Trace", List<string> variables = null, int durationMs = 2000, Dictionary<string, string> triggerWrite = null, string filterCondition = null, double deadband = 0.01)
+        {
+            return PlcTraceAndLoggerHelper.CaptureAndAnalyzeTrace(traceName, variables, durationMs, triggerWrite, filterCondition, deadband);
+        }
+
+        public static PlcLoggerSetupResult SetupPlcLogger(int bufferSize = 64, string autoInjectPou = null)
+        {
+            return PlcTraceAndLoggerHelper.SetupPlcLogger(bufferSize, autoInjectPou);
+        }
+
+        public static PlcLogsResult ReadPlcLogs(string tagFilter = null, int lastN = 32, bool clearAfterRead = false)
+        {
+            return PlcTraceAndLoggerHelper.ReadPlcLogs(tagFilter, lastN, clearAfterRead);
         }
     }
 }

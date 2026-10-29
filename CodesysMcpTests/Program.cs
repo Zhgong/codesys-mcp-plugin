@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -12,6 +12,14 @@ namespace CodesysMcpTests
             if (!EqualityComparer<T>.Default.Equals(expected, actual))
             {
                 throw new Exception($"Assert.AreEqual failed. Expected: <{expected}>, Actual: <{actual}>. {message}");
+            }
+        }
+
+        public static void AreEqual(double expected, double actual, double delta, string message = "")
+        {
+            if (Math.Abs(expected - actual) > delta)
+            {
+                throw new Exception($"Assert.AreEqual failed. Expected: <{expected}> (+/- {delta}), Actual: <{actual}>. {message}");
             }
         }
 
@@ -91,7 +99,8 @@ namespace CodesysMcpTests
                 typeof(DiffViewerTests),
                 typeof(OnlineTests),
                 typeof(BatchRecipeTests),
-                typeof(IdeUiIndicatorTests)
+                typeof(IdeUiIndicatorTests),
+                typeof(TraceAndLoggerTests)
             };
 
             int passed = 0;

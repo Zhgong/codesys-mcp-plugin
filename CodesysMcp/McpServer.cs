@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
@@ -463,6 +463,40 @@ namespace CodesysMcp
 
                 case "get_ui_indicator_status":
                     return CodesysOperations.GetUiIndicatorStatus();
+
+                case "capture_and_analyze_trace":
+                    string ctName = args.ContainsKey("trace_name") && !string.IsNullOrEmpty(args["trace_name"]?.ToString())
+                        ? args["trace_name"].ToString()
+                        : "Trace";
+                    var ctVars = new List<string>();
+                    if (args.ContainsKey("variables") && args["variables"] is System.Collections.IEnumerable cvArr)
+                    {
+                        foreach (var item in cvArr) if (item != null) ctVars.Add(item.ToString());
+                    }
+                    int ctDur = args.ContainsKey("duration_ms") ? Convert.ToInt32(args["duration_ms"]) : 2000;
+                    Dictionary<string, string> ctTrig = null;
+                    if (args.ContainsKey("trigger_write") && args["trigger_write"] is System.Collections.IDictionary ctd)
+                    {
+                        ctTrig = new Dictionary<string, string>();
+                        foreach (System.Collections.DictionaryEntry kv in ctd)
+                        {
+                            if (kv.Key != null) ctTrig[kv.Key.ToString()] = kv.Value?.ToString() ?? string.Empty;
+                        }
+                    }
+                    string ctCond = args.ContainsKey("filter_condition") ? args["filter_condition"]?.ToString() : null;
+                    double ctDeadband = args.ContainsKey("deadband") ? Convert.ToDouble(args["deadband"]) : 0.01;
+                    return CodesysOperations.CaptureAndAnalyzeTrace(ctName, ctVars.Count > 0 ? ctVars : null, ctDur, ctTrig, ctCond, ctDeadband);
+
+                case "setup_plc_logger":
+                    int slBuf = args.ContainsKey("buffer_size") ? Convert.ToInt32(args["buffer_size"]) : 64;
+                    string slPou = args.ContainsKey("auto_inject_pou") ? args["auto_inject_pou"]?.ToString() : null;
+                    return CodesysOperations.SetupPlcLogger(slBuf, slPou);
+
+                case "read_plc_logs":
+                    string rlTag = args.ContainsKey("tag_filter") ? args["tag_filter"]?.ToString() : null;
+                    int rlLastN = args.ContainsKey("last_n") ? Convert.ToInt32(args["last_n"]) : 32;
+                    bool rlClear = args.ContainsKey("clear_after_read") && Convert.ToBoolean(args["clear_after_read"]);
+                    return CodesysOperations.ReadPlcLogs(rlTag, rlLastN, rlClear);
 
                 case "diag_online":
                     var formsInfo = new List<string>();
@@ -1111,6 +1145,53 @@ namespace CodesysMcp
                     {
                         type = "object",
                         properties = new { }
+                    }
+                },
+                new
+                {
+                    name = "capture_and_analyze_trace",
+                    description = "Execute hard real-time cycle-accurate sampling via CODESYS runtime Trace engine (CmpTraceMgr) and extract state transitions, condition matches, and statistics.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            trace_name = new { type = "string", description = "Trace object name in project (defaults to 'Trace')" },
+                            variables = new { type = "array", items = new { type = "string" }, description = "Optional variable names to ensure in trace" },
+                            duration_ms = new { type = "integer", description = "Recording duration in milliseconds (defaults to 2000)" },
+                            trigger_write = new { type = "object", description = "Optional stimulus variables to write immediately after starting trace" },
+                            filter_condition = new { type = "string", description = "Optional condition expression to search in trace (e.g. 'rForce >= 5000' or 'eState == 20')" },
+                            deadband = new { type = "number", description = "Deadband threshold for continuous analog value change detection (defaults to 0.01)" }
+                        }
+                    }
+                },
+                new
+                {
+                    name = "setup_plc_logger",
+                    description = "Deploy zero-dependency In-PLC Ring-Buffer Logger (ST_McpLogEntry, FB_McpLogger, GVL_McpLogger) into active project for cycle-accurate debugging.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            buffer_size = new { type = "integer", description = "Ring buffer slot capacity (defaults to 64)" },
+                            auto_inject_pou = new { type = "string", description = "Optional POU name to inject GVL_McpLogger.McpLogger.TickCycle() call into implementation" }
+                        }
+                    }
+                },
+                new
+                {
+                    name = "read_plc_logs",
+                    description = "Read and parse cycle-accurate structured logs recorded by the PLC runtime, with optional tag filtering and buffer clearing.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            tag_filter = new { type = "string", description = "Optional tag filter (e.g. 'STATE', 'ERROR', 'PRESS')" },
+                            last_n = new { type = "integer", description = "Maximum number of most recent log entries to return (defaults to 32)" },
+                            clear_after_read = new { type = "boolean", description = "Whether to reset the PLC log ring buffer after reading" }
+                        }
                     }
                 }
             };

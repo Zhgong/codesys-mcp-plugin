@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Web.Script.Serialization;
@@ -177,7 +177,7 @@ namespace CodesysMcpTests
         }
 
         [TestMethod]
-        public void TestToolsListReturnsAllThirtyTools()
+        public void TestToolsListReturnsAllThirtyThreeTools()
         {
             var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 6, \"method\": \"tools/list\", \"params\": {}}");
             Assert.IsNotNull(res);
@@ -185,7 +185,7 @@ namespace CodesysMcpTests
             Assert.IsNotNull(result);
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools);
-            Assert.AreEqual(30, tools.Count);
+            Assert.AreEqual(33, tools.Count);
 
             var names = new List<string>();
             foreach (Dictionary<string, object> t in tools)
@@ -198,6 +198,9 @@ namespace CodesysMcpTests
             Assert.IsTrue(names.Contains("read_struct"));
             Assert.IsTrue(names.Contains("read_array"));
             Assert.IsTrue(names.Contains("get_ui_indicator_status"));
+            Assert.IsTrue(names.Contains("capture_and_analyze_trace"));
+            Assert.IsTrue(names.Contains("setup_plc_logger"));
+            Assert.IsTrue(names.Contains("read_plc_logs"));
         }
 
         [TestMethod]
