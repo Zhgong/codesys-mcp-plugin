@@ -132,6 +132,31 @@ namespace CodesysMcp
 
     }
 
+        public class DeviceLogEntryDto
+    {
+        public DateTime timestamp { get; set; }
+        public string severity { get; set; }
+        public string component { get; set; }
+        public string message { get; set; }
+    }
+
+    public class DeviceLogResult
+    {
+        public bool success { get; set; }
+        public int totalEntries { get; set; }
+        public List<DeviceLogEntryDto> entries { get; set; } = new List<DeviceLogEntryDto>();
+        public string message { get; set; }
+    }
+
+    public class SetupDeviceLoggerResult
+    {
+        public bool success { get; set; }
+        public bool cmpLogReferenced { get; set; }
+        public bool fcCreated { get; set; }
+        public string sampleCall { get; set; }
+        public string message { get; set; }
+    }
+
     public static class PlcTraceAndLoggerHelper
 
     {
@@ -1121,143 +1146,413 @@ END_VAR";
                 return res;
 
             });
-
         }
 
-        public static PlcLogsResult ReadPlcLogs(string tagFilter = null, int lastN = 32, bool clearAfterRead = false)
-
+        public static (string declaration, string implementation) GenerateLogMsgFunctionSource()
         {
+            string decl = @"FUNCTION FC_LogMsg : BOOL
+VAR_INPUT
+    sMsg    : STRING(255);
+    nLevel  : INT := 1; // 1: INFO, 2: WARNING, 3: ERROR
+END_VAR
+VAR
+    udiClass : UDINT;
+END_VAR";
+
+            string impl = @"CASE nLevel OF
+    2: udiClass := 16#00000002; // CmpLog.LogClass.LOG_WARNING
+    3: udiClass := 16#00000004; // CmpLog.LogClass.LOG_ERROR
+ELSE
+    udiClass := 16#00000001; // CmpLog.LogClass.LOG_INFO
+END_CASE;
+
+CmpLog.LogAdd(
+    hLogger    := 16#FFFFFFFF, // RTS_INVALID_HANDLE -> default PLC logger
+    udiClass   := udiClass,
+    udiErrorID := 0,
+    udiInfoID  := 0,
+    pszInfo    := ADR(sMsg)
+);
+FC_LogMsg := TRUE;";
+
+            return (decl, impl);
+        }
+
+        public static bool EnsureCmpLogLibraryReferenced()
+        {
+            try
+            {
+                var proj = CodesysContext.PrimaryProject;
+                if (proj == null) return false;
+
+                var libManObj = CodesysOperations.FindObjectByName("Library Manager");
+                if (libManObj == null) return false;
+
+                dynamic libManExt = CodesysOperations.GetExtension<dynamic>(libManObj);
+                if (libManExt == null) return false;
+
+                try
+                {
+                    var existingLibs = libManExt.get_libraries(false) as System.Collections.IEnumerable;
+                    if (existingLibs != null)
+                    {
+                        foreach (var lib in existingLibs)
+                        {
+                            if (lib != null && lib.ToString().IndexOf("CmpLog", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    libManExt.add_placeholder("CmpLog", "CmpLog");
+                    return true;
+                }
+                catch
+                {
+                    try
+                    {
+                        libManExt.add_library("CmpLog");
+                        return true;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        public static SetupDeviceLoggerResult SetupDeviceLogger()
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var proj = CodesysContext.PrimaryProject;
+                if (proj == null)
+                {
+                    return new SetupDeviceLoggerResult
+                    {
+                        success = false,
+                        message = "Cannot setup device logger when no CODESYS project is open."
+                    };
+                }
+
+                var res = new SetupDeviceLoggerResult();
+
+                // 1. Ensure CmpLog library is referenced
+                res.cmpLogReferenced = EnsureCmpLogLibraryReferenced();
+
+                // 2. Ensure FC_LogMsg function exists
+                var existingFc = CodesysOperations.FindObjectByName("FC_LogMsg");
+                if (existingFc == null)
+                {
+                    var (decl, impl) = GenerateLogMsgFunctionSource();
+                    CodesysOperations.WritePou("FC_LogMsg", decl, impl, "Function");
+                    res.fcCreated = true;
+                }
+                else
+                {
+                    res.fcCreated = false;
+                }
+
+                res.success = true;
+                res.sampleCall = "FC_LogMsg('State 20: Workpiece contacted'); // Or with concat: FC_LogMsg(CONCAT('Force=', REAL_TO_STRING(rDispForce)));";
+                res.message = "Device logger setup complete. CmpLog library and FC_LogMsg function are ready.";
+                return res;
+            });
+        }
+
+        public static PouContentResult InjectCodeLog(string pouName, string targetPattern, string logMessage, int level = 1, bool insertAfter = true)
+        {
+            if (string.IsNullOrEmpty(pouName)) throw new ArgumentException("Parameter 'pouName' is required.");
+            if (string.IsNullOrEmpty(targetPattern)) throw new ArgumentException("Parameter 'targetPattern' is required.");
+            if (string.IsNullOrEmpty(logMessage)) throw new ArgumentException("Parameter 'logMessage' is required.");
 
             return CodesysContext.RunOnPrimaryThread(() =>
-
             {
+                var pou = CodesysOperations.ReadPou(pouName);
+                string impl = pou.implementation ?? "";
 
+                int idx = impl.IndexOf(targetPattern, StringComparison.OrdinalIgnoreCase);
+                if (idx < 0)
+                {
+                    throw new InvalidOperationException($"Target pattern '{targetPattern}' not found in implementation of POU '{pouName}'.");
+                }
+
+                string logCall = level > 1 
+                    ? $"FC_LogMsg('{logMessage}', {level});"
+                    : $"FC_LogMsg('{logMessage}');";
+
+                string newImpl;
+                if (insertAfter)
+                {
+                    int eol = impl.IndexOf('\n', idx);
+                    if (eol < 0) eol = impl.Length;
+                    else eol++;
+
+                    int lineStart = impl.LastIndexOf('\n', idx);
+                    lineStart = lineStart < 0 ? 0 : lineStart + 1;
+                    string indent = "";
+                    for (int i = lineStart; i < idx && char.IsWhiteSpace(impl[i]); i++) indent += impl[i];
+
+                    newImpl = impl.Substring(0, eol) + indent + logCall + "\r\n" + impl.Substring(eol);
+                }
+                else
+                {
+                    int lineStart = impl.LastIndexOf('\n', idx);
+                    lineStart = lineStart < 0 ? 0 : lineStart + 1;
+                    string indent = "";
+                    for (int i = lineStart; i < idx && char.IsWhiteSpace(impl[i]); i++) indent += impl[i];
+
+                    newImpl = impl.Substring(0, lineStart) + indent + logCall + "\r\n" + impl.Substring(lineStart);
+                }
+
+                return CodesysOperations.WritePou(pouName, pou.declaration, newImpl, "Program");
+            });
+        }
+
+        
+        public static PlcLogsResult ReadPlcLogs(string tagFilter = null, int lastN = 32, bool clearAfterRead = false)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
                 var proj = CodesysContext.PrimaryProject;
-
                 if (proj == null) return ReadPlcLogsOfflineSafe();
 
                 var res = new PlcLogsResult();
 
                 // Read logger meta properties
-
                 var metaVars = new List<string>
-
                 {
-
                     "GVL_McpLogger.McpLogger.nTotalCount",
-
                     "GVL_McpLogger.McpLogger.nWriteIdx",
-
                     "GVL_McpLogger.McpLogger.nCycleCounter"
-
                 };
 
                 var metaRead = CodesysOnlineHelper.ReadVariables(metaVars);
-
                 long totalCount = 0;
-
                 long writeIdx = 0;
-
                 long cycleCounter = 0;
 
                 if (metaRead.values != null)
-
                 {
-
                     if (metaRead.values.TryGetValue("GVL_McpLogger.McpLogger.nTotalCount", out string sTot))
-
                         long.TryParse(CodesysOnlineHelper.NormalizeIecValue(sTot), out totalCount);
-
                     if (metaRead.values.TryGetValue("GVL_McpLogger.McpLogger.nWriteIdx", out string sIdx))
-
                         long.TryParse(CodesysOnlineHelper.NormalizeIecValue(sIdx), out writeIdx);
-
                     if (metaRead.values.TryGetValue("GVL_McpLogger.McpLogger.nCycleCounter", out string sCyc))
-
                         long.TryParse(CodesysOnlineHelper.NormalizeIecValue(sCyc), out cycleCounter);
-
                 }
 
                 res.currentPlcCycle = cycleCounter;
-
                 res.totalLogsWritten = totalCount;
 
                 if (totalCount <= 0)
-
                 {
-
                     res.success = true;
-
                     res.message = "No PLC logs have been written yet.";
-
                     return res;
-
                 }
 
                 // Read buffered entries
-
                 int countToRead = (int)Math.Min(totalCount, Math.Min(64, lastN > 0 ? lastN : 32));
-
                 var rawEntries = new List<PlcLogEntryDto>();
 
                 for (int i = 0; i < countToRead; i++)
-
                 {
-
                     var entryRead = CodesysOnlineHelper.ReadStruct($"GVL_McpLogger.McpLogger.aBuffer[{i}]");
-
                     if (entryRead != null && entryRead.values != null && entryRead.values.Count > 0)
-
                     {
-
                         var dto = new PlcLogEntryDto();
-
                         if (entryRead.values.TryGetValue("nSeq", out var vSeq)) dto.seq = Convert.ToInt64(vSeq);
-
                         if (entryRead.values.TryGetValue("nCycle", out var vCyc)) dto.cycle = Convert.ToInt64(vCyc);
-
                         if (entryRead.values.TryGetValue("sTag", out var vTag)) dto.tag = vTag?.ToString()?.Trim('\'');
-
                         if (entryRead.values.TryGetValue("sMsg", out var vMsg)) dto.msg = vMsg?.ToString()?.Trim('\'');
-
                         if (entryRead.values.TryGetValue("rVal1", out var v1)) { float.TryParse(v1?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out float f1); dto.val1 = f1; }
-
                         if (entryRead.values.TryGetValue("rVal2", out var v2)) { float.TryParse(v2?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out float f2); dto.val2 = f2; }
-
                         rawEntries.Add(dto);
-
                     }
-
                 }
 
                 res.entries = ReconstructRingBuffer(rawEntries, totalCount, tagFilter, lastN);
 
                 if (clearAfterRead)
-
                 {
-
                     try
-
                     {
-
                         CodesysOnlineHelper.WriteVariable("GVL_McpLogger.McpLogger.bClear", "TRUE");
-
                     }
-
                     catch { }
-
                 }
 
                 res.success = true;
-
                 res.message = $"Read {res.entries.Count} log entry(s) from PLC runtime at cycle {cycleCounter}.";
-
                 return res;
-
             });
-
         }
 
-    }
+        public static DeviceLogResult ReadDeviceLogOfflineSafe()
+        {
+            return new DeviceLogResult
+            {
+                success = false,
+                message = "Cannot read device logs when no online session is active."
+            };
+        }
 
+        public static DeviceLogResult ReadDeviceLog(string severityFilter = null, string keyword = null, int maxEntries = 50)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var proj = CodesysContext.PrimaryProject;
+                if (proj == null) return ReadDeviceLogOfflineSafe();
+
+                var res = new DeviceLogResult();
+
+                dynamic onlineModule = CodesysContext.Online;
+                if (onlineModule == null)
+                {
+                    res.success = false;
+                    res.message = "Online engine is not available.";
+                    return res;
+                }
+
+                var devObj = CodesysOperations.FindObjectByName("Device");
+                if (devObj == null)
+                {
+                    res.success = false;
+                    res.message = "Device object not found in active project.";
+                    return res;
+                }
+
+                dynamic onlineDev = null;
+                try
+                {
+                    onlineDev = onlineModule.create_online_device(devObj);
+                }
+                catch (Exception ex)
+                {
+                    res.success = false;
+                    res.message = "Failed to create online device: " + ex.Message;
+                    return res;
+                }
+
+                if (onlineDev == null)
+                {
+                    res.success = false;
+                    res.message = "create_online_device returned null.";
+                    return res;
+                }
+
+                try
+                {
+                    bool isConnected = false;
+                    try { isConnected = (bool)onlineDev.get_connected(); } catch { }
+                    if (!isConnected)
+                    {
+                        try { onlineDev.connect(); } catch { }
+                    }
+                }
+                catch { }
+
+                dynamic loggerService = null;
+                try
+                {
+                    var m = onlineDev.GetType().GetMethod("CreateLoggerServiceHandler");
+                    if (m != null)
+                    {
+                        loggerService = m.Invoke(onlineDev, null);
+                    }
+                    else
+                    {
+                        foreach (var iface in onlineDev.GetType().GetInterfaces())
+                        {
+                            if (iface.Name.Contains("IOnlineDevice3"))
+                            {
+                                var m3 = iface.GetMethod("CreateLoggerServiceHandler");
+                                if (m3 != null)
+                                {
+                                    loggerService = m3.Invoke(onlineDev, null);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    res.success = false;
+                    res.message = "Failed to create logger service handler: " + ex.Message;
+                    return res;
+                }
+
+                if (loggerService == null)
+                {
+                    res.success = false;
+                    res.message = "Logger service handler is not supported on this device.";
+                    return res;
+                }
+
+                try
+                {
+                    var arNames = loggerService.BeginGetLoggerNames(null, null);
+                    string[] names = loggerService.EndGetLoggerNames(arNames);
+                    string targetName = (names != null && names.Length > 0) ? names[0] : "PlcLog";
+
+                    var arEntries = loggerService.BeginGetLoggerEntries(null, null, (uint)0, DateTime.MinValue, targetName);
+                    dynamic entries = loggerService.EndGetLoggerEntries(arEntries);
+
+                    if (entries != null)
+                    {
+                        var dtoList = new List<DeviceLogEntryDto>();
+                        foreach (var entry in entries)
+                        {
+                            if (entry == null) continue;
+                            var dto = new DeviceLogEntryDto();
+                            try { dto.timestamp = (DateTime)entry.TimeStamp; } catch { dto.timestamp = DateTime.Now; }
+                            try { dto.message = entry.Info?.ToString() ?? ""; } catch { dto.message = ""; }
+                            try { dto.component = entry.CmpID.ToString(); } catch { }
+                            try
+                            {
+                                var sev = entry.GetSeverity();
+                                dto.severity = sev != null ? sev.ToString() : "Info";
+                            }
+                            catch { dto.severity = "Info"; }
+
+                            if (!string.IsNullOrEmpty(severityFilter) && !dto.severity.Equals(severityFilter, StringComparison.OrdinalIgnoreCase))
+                                continue;
+                            if (!string.IsNullOrEmpty(keyword) && (dto.message == null || dto.message.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) < 0))
+                                continue;
+
+                            dtoList.Add(dto);
+                        }
+
+                        if (maxEntries > 0 && dtoList.Count > maxEntries)
+                        {
+                            dtoList = dtoList.Skip(dtoList.Count - maxEntries).ToList();
+                        }
+
+                        res.entries = dtoList;
+                        res.totalEntries = dtoList.Count;
+                        res.success = true;
+                        res.message = $"Successfully read {dtoList.Count} device log entries.";
+                        return res;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    res.success = false;
+                    res.message = "Error fetching logger entries: " + ex.Message;
+                    return res;
+                }
+
+                res.success = true;
+                res.message = "No device log entries recorded.";
+                return res;
+            });
+        }
+    }
 }

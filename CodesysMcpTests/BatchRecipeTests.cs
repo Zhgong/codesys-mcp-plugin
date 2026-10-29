@@ -185,7 +185,7 @@ namespace CodesysMcpTests
             Assert.IsNotNull(result);
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools);
-            Assert.AreEqual(33, tools.Count);
+            Assert.AreEqual(36, tools.Count);
 
             var names = new List<string>();
             foreach (Dictionary<string, object> t in tools)
@@ -201,6 +201,9 @@ namespace CodesysMcpTests
             Assert.IsTrue(names.Contains("analyze_trace"));
             Assert.IsTrue(names.Contains("setup_plc_logger"));
             Assert.IsTrue(names.Contains("read_plc_logs"));
+            Assert.IsTrue(names.Contains("setup_device_logger"));
+            Assert.IsTrue(names.Contains("inject_code_log"));
+            Assert.IsTrue(names.Contains("read_device_log"));
         }
 
         [TestMethod]

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -100,7 +100,8 @@ namespace CodesysMcpTests
                 typeof(OnlineTests),
                 typeof(BatchRecipeTests),
                 typeof(IdeUiIndicatorTests),
-                typeof(TraceAndLoggerTests)
+                typeof(TraceAndLoggerTests),
+                typeof(DeviceLoggerTests)
             };
 
             int passed = 0;
