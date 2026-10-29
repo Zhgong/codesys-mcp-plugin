@@ -139,7 +139,7 @@ namespace CodesysMcp
                     };
 
                     ss.Items.Add(_statusBadge);
-                    ss.BringToFront();
+                    ss.SendToBack();
 
                     _currentStatus = McpServerStatus.Online;
                     CodesysContext.LogToIde($"[SUCCESS] CodesysIdeUiHelper: MCP visual status badge installed on persistent strip '{ss.Name}'.");
@@ -178,7 +178,7 @@ namespace CodesysMcp
                         return;
                     }
 
-                    _hostStatusStrip.BringToFront();
+                    _hostStatusStrip.SendToBack();
                     ApplyStatusToBadge();
                 }
                 catch (Exception ex)
@@ -370,15 +370,43 @@ namespace CodesysMcp
                 Name = "CodesysMcpStatusStrip",
                 Dock = DockStyle.Bottom,
                 Height = 22,
-                BackColor = Color.FromArgb(242, 242, 242),
+                BackColor = SystemColors.Control,
                 RenderMode = ToolStripRenderMode.System,
+                GripStyle = ToolStripGripStyle.Hidden,
+                Padding = Padding.Empty,
+                Margin = Padding.Empty,
                 ShowItemToolTips = true,
                 Visible = true
             };
 
             mainForm.Controls.Add(dedicatedStrip);
-            dedicatedStrip.BringToFront();
+            dedicatedStrip.SendToBack();
             return dedicatedStrip;
+        }
+
+        private static bool SafeSetClipboard(string text)
+        {
+            bool success = false;
+            var t = new Thread(() =>
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    try
+                    {
+                        Clipboard.SetDataObject(text, true, 5, 100);
+                        success = true;
+                        return;
+                    }
+                    catch
+                    {
+                        Thread.Sleep(50);
+                    }
+                }
+            });
+            t.SetApartmentState(ApartmentState.STA);
+            t.Start();
+            t.Join(1000);
+            return success;
         }
 
         public static ContextMenuStrip CreateContextMenu()
@@ -391,12 +419,19 @@ namespace CodesysMcp
                 try
                 {
                     string pipePath = @"\\.\pipe\" + _currentPipeName;
-                    Clipboard.SetText(pipePath);
-                    MessageBox.Show(
-                        $"Named Pipe address copied to clipboard:\n\n{pipePath}\n\nYou can use this address in Cursor, Claude Desktop, or your MCP client configuration.",
-                        "CODESYS MCP Server",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
+                    bool copied = SafeSetClipboard(pipePath);
+                    if (copied)
+                    {
+                        MessageBox.Show(
+                            $"Named Pipe address copied to clipboard:\n\n{pipePath}\n\nYou can use this address in Cursor, Claude Desktop, or your MCP client configuration.",
+                            "CODESYS MCP Server",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+                    }
+                    else
+                    {
+                        CodesysContext.LogToIde("[ERROR] CodesysIdeUiHelper: SafeSetClipboard failed after retries.");
+                    }
                 }
                 catch (Exception ex)
                 {
