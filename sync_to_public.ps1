@@ -4,13 +4,15 @@
 .DESCRIPTION
     Safely synchronizes approved commits from private development to the public repository.
     Enforces the Gatekeeper security checks before prompting for confirmation.
+    Supports -FilterIgnored to automatically strip internal files (wiki/, roadmaps) during release.
 #>
 [CmdletBinding()]
 param (
     [string]$Branch = "",
     [switch]$DryRun = $false,
     [switch]$SkipTests = $false,
-    [switch]$IncludeTags = $false
+    [switch]$IncludeTags = $false,
+    [switch]$FilterIgnored = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,6 +26,7 @@ Write-Host "==========================================================" -Foregro
 Write-Host " [PUBLIC RELEASE SYNC] CODESYS MCP Plugin Release Tool" -ForegroundColor Cyan
 Write-Host " Source Branch : $Branch" -ForegroundColor Gray
 Write-Host " Target Remote : public (https://github.com/Zhgong/codesys-mcp-plugin.git)" -ForegroundColor Gray
+Write-Host " Filter Mode   : $(if ($FilterIgnored) { 'AUTO-STRIP (.publicignore)' } else { 'STRICT CHECK' })" -ForegroundColor Gray
 Write-Host " Mode          : $(if ($DryRun) { 'DRY RUN (Preview Only)' } else { 'LIVE SYNC' })" -ForegroundColor Gray
 Write-Host "==========================================================" -ForegroundColor Cyan
 
@@ -35,52 +38,95 @@ if ($status) {
     exit 1
 }
 
-# 2. Run Gatekeeper Checks
-$gateScript = Join-Path $ScriptDir "check_public_gate.ps1"
-$gateArgs = @("-Branch", $Branch, "-Remote", "public")
-if ($SkipTests) { $gateArgs += "-SkipTests" }
+# 2. If FilterIgnored is requested, prepare clean public-release branch
+$originalBranch = $Branch
+$pushBranch = $Branch
 
-& powershell -ExecutionPolicy Bypass -File $gateScript @gateArgs
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "`n[ERROR] Gatekeeper validation failed! Sync to public repository has been aborted." -ForegroundColor Red
-    exit 1
+if ($FilterIgnored) {
+    Write-Host "`n>>> [FILTER MODE] Creating clean public release tree (stripping .publicignore items)..." -ForegroundColor Cyan
+    $releaseBranch = "public-release-$Branch"
+    
+    # Check out release branch from current branch
+    git -C $ScriptDir checkout -B $releaseBranch $Branch 2>$null
+
+    # Load publicignore patterns
+    $publicIgnorePath = Join-Path $ScriptDir ".publicignore"
+    if (Test-Path $publicIgnorePath) {
+        $patterns = Get-Content $publicIgnorePath | Where-Object { $_ -and -not $_.StartsWith("#") }
+        foreach ($pat in $patterns) {
+            $p = $pat.Trim().TrimEnd("/")
+            if (Test-Path (Join-Path $ScriptDir $p)) {
+                git -C $ScriptDir rm -r -f --quiet $p 2>$null
+                Write-Host "   - Stripped: $p" -ForegroundColor Yellow
+            }
+        }
+    }
+
+    $filterStatus = git -C $ScriptDir status --porcelain
+    if ($filterStatus) {
+        git -C $ScriptDir commit -m "chore(release): strip internal wiki and planning docs for public release" --quiet
+        Write-Host "   [DONE] Clean release commit created on $releaseBranch." -ForegroundColor Green
+    }
+    $pushBranch = $releaseBranch
 }
 
-# 3. Review outgoing commits
-Write-Host "`n>>> Outgoing commits to be merged into public/${Branch}:" -ForegroundColor Cyan
-$outgoing = git -C $ScriptDir log "public/${Branch}..HEAD" --oneline
-if ($outgoing) {
-    $outgoing | ForEach-Object { Write-Host "   $_" -ForegroundColor Green }
-} else {
-    Write-Host "   (Public repository is already up to date with $Branch. No new commits to push.)" -ForegroundColor Yellow
-    exit 0
-}
+try {
+    # 3. Run Gatekeeper Checks
+    $gateScript = Join-Path $ScriptDir "check_public_gate.ps1"
+    $gateArgs = @("-Branch", $pushBranch, "-Remote", "public")
+    if ($SkipTests) { $gateArgs += "-SkipTests" }
 
-# 4. Check DryRun
-if ($DryRun) {
-    Write-Host "`n[DRY RUN COMPLETE] Gate passed and outgoing commits verified. No changes were pushed to public." -ForegroundColor Yellow
-    exit 0
-}
+    & powershell -ExecutionPolicy Bypass -File $gateScript @gateArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`n[ERROR] Gatekeeper validation failed! Sync to public repository has been aborted." -ForegroundColor Red
+        if (-not $FilterIgnored) {
+            Write-Host "[TIP] If the rejection was caused by internal docs (e.g. wiki/), run with -FilterIgnored to publish without them:" -ForegroundColor Yellow
+            Write-Host "      powershell ./sync_to_public.ps1 -FilterIgnored`n" -ForegroundColor Yellow
+        }
+        exit 1
+    }
 
-# 5. Prompt for explicit confirmation
-Write-Host ""
-$confirmation = Read-Host "Are you sure you want to push these commits to the PUBLIC repository? (yes/no)"
-if ($confirmation -ne "yes" -and $confirmation -ne "y") {
-    Write-Host "[ABORTED] Public sync cancelled by user." -ForegroundColor Yellow
-    exit 0
-}
+    # 4. Review outgoing commits
+    Write-Host "`n>>> Outgoing commits to be merged into public/${Branch}:" -ForegroundColor Cyan
+    $outgoing = git -C $ScriptDir log "public/${Branch}..$pushBranch" --oneline
+    if ($outgoing) {
+        $outgoing | ForEach-Object { Write-Host "   $_" -ForegroundColor Green }
+    } else {
+        Write-Host "   (Public repository is already up to date with $Branch. No new commits to push.)" -ForegroundColor Yellow
+        return
+    }
 
-# 6. Execute push
-Write-Host "`n>>> Pushing $Branch to public..." -ForegroundColor Cyan
-git -C $ScriptDir push public "$Branch"
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] git push public failed!" -ForegroundColor Red
-    exit 1
-}
+    # 5. Check DryRun
+    if ($DryRun) {
+        Write-Host "`n[DRY RUN COMPLETE] Gate passed and outgoing commits verified. No changes were pushed to public." -ForegroundColor Yellow
+        return
+    }
 
-if ($IncludeTags) {
-    Write-Host ">>> Pushing tags to public..." -ForegroundColor Cyan
-    git -C $ScriptDir push public --tags
-}
+    # 6. Prompt for explicit confirmation
+    Write-Host ""
+    $confirmation = Read-Host "Are you sure you want to push these commits to the PUBLIC repository? (yes/no)"
+    if ($confirmation -ne "yes" -and $confirmation -ne "y") {
+        Write-Host "[ABORTED] Public sync cancelled by user." -ForegroundColor Yellow
+        return
+    }
 
-Write-Host "`n[SUCCESS] Successfully synced $Branch to the public repository!" -ForegroundColor Green
+    # 7. Execute push
+    Write-Host "`n>>> Pushing $pushBranch to public/$Branch..." -ForegroundColor Cyan
+    git -C $ScriptDir push public "${pushBranch}:${Branch}"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] git push public failed!" -ForegroundColor Red
+        exit 1
+    }
+
+    if ($IncludeTags) {
+        Write-Host ">>> Pushing tags to public..." -ForegroundColor Cyan
+        git -C $ScriptDir push public --tags
+    }
+
+    Write-Host "`n[SUCCESS] Successfully synced to the public repository!" -ForegroundColor Green
+}
+finally {
+    if ($FilterIgnored -and (git -C $ScriptDir branch --show-current).Trim() -ne $originalBranch) {
+        git -C $ScriptDir checkout $originalBranch --quiet 2>$null
+    }
+}
