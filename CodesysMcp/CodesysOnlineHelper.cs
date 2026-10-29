@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Text.RegularExpressions;
 
 namespace CodesysMcp
 {
@@ -34,9 +35,49 @@ namespace CodesysMcp
         public string message { get; set; }
     }
 
+    public class BatchWriteItemResult
+    {
+        public string target { get; set; }
+        public string actual { get; set; }
+        public bool verified { get; set; }
+        public string error { get; set; }
+    }
+
+    public class BatchWriteResult
+    {
+        public bool success { get; set; }
+        public int totalCount { get; set; }
+        public int succeededCount { get; set; }
+        public int failedCount { get; set; }
+        public bool allVerified { get; set; }
+        public Dictionary<string, BatchWriteItemResult> details { get; set; } = new Dictionary<string, BatchWriteItemResult>();
+        public string message { get; set; }
+    }
+
+    public class ReadArrayResult
+    {
+        public bool success { get; set; }
+        public string variable { get; set; }
+        public int startIndex { get; set; }
+        public int count { get; set; }
+        public List<string> items { get; set; } = new List<string>();
+        public string message { get; set; }
+    }
+
+    public class ReadStructResult
+    {
+        public bool success { get; set; }
+        public string variable { get; set; }
+        public string typeName { get; set; }
+        public Dictionary<string, object> values { get; set; } = new Dictionary<string, object>();
+        public string rawText { get; set; }
+        public string message { get; set; }
+    }
+
     public static class CodesysOnlineHelper
     {
         private static object _cachedOnlineApp;
+        public static object GetCachedOnlineApp() => _cachedOnlineApp;
 
         public static string NormalizeIecValue(string raw)
         {
@@ -216,6 +257,7 @@ namespace CodesysMcp
                 {
                     _cachedOnlineApp = null;
                 }
+                _cachedOnlineApp = null;
             }
 
             if (CodesysContext.Online == null)
@@ -360,6 +402,7 @@ namespace CodesysMcp
                     }
                 }
 
+
                 var onlineApp = GetOrCreateOnlineApp(appName);
                 var loginMethod = onlineApp.GetType().GetMethod("login");
                 if (loginMethod == null)
@@ -411,13 +454,15 @@ namespace CodesysMcp
                 catch (TargetInvocationException ex)
                 {
                     var inner = ex.InnerException ?? ex;
-                    CodesysContext.LogToIde($"[ERROR] plc_login failed: {inner.Message}");
-                    throw inner;
+                    string fullErr = inner.ToString();
+                    CodesysContext.LogToIde($"[ERROR] plc_login failed: {fullErr}");
+                    throw new Exception(fullErr);
                 }
                 catch (Exception ex)
                 {
-                    CodesysContext.LogToIde($"[ERROR] plc_login failed: {ex.Message}");
-                    throw;
+                    string fullErr = ex.ToString();
+                    CodesysContext.LogToIde($"[ERROR] plc_login failed: {fullErr}");
+                    throw new Exception(fullErr);
                 }
             });
         }
@@ -607,6 +652,424 @@ namespace CodesysMcp
                 }
 
                 return GetOnlineStatus();
+            });
+        }
+
+        public static void FlattenObject(string prefix, object obj, Dictionary<string, string> output)
+        {
+            if (obj == null) return;
+
+            if (obj is IDictionary dict)
+            {
+                foreach (DictionaryEntry kv in dict)
+                {
+                    string key = kv.Key?.ToString();
+                    if (string.IsNullOrEmpty(key)) continue;
+                    string fullKey = string.IsNullOrEmpty(prefix) ? key : prefix + "." + key;
+                    FlattenObject(fullKey, kv.Value, output);
+                }
+            }
+            else if (obj is IList list && !(obj is string))
+            {
+                for (int i = 0; i < list.Count; i++)
+                {
+                    string fullKey = $"{prefix}[{i}]";
+                    FlattenObject(fullKey, list[i], output);
+                }
+            }
+            else if (obj is bool b)
+            {
+                output[prefix] = b ? "TRUE" : "FALSE";
+            }
+            else
+            {
+                output[prefix] = obj.ToString();
+            }
+        }
+
+        public static Dictionary<string, object> ParseIecStructString(string raw)
+        {
+            var dict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(raw)) return dict;
+            string s = raw.Trim();
+            if (s.StartsWith("(") && s.EndsWith(")"))
+            {
+                s = s.Substring(1, s.Length - 2).Trim();
+            }
+
+            int depth = 0;
+            int start = 0;
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (s[i] == '(') depth++;
+                else if (s[i] == ')') depth--;
+                else if (s[i] == ',' && depth == 0)
+                {
+                    AddIecField(s.Substring(start, i - start), dict);
+                    start = i + 1;
+                }
+            }
+            if (start < s.Length)
+            {
+                AddIecField(s.Substring(start), dict);
+            }
+            return dict;
+        }
+
+        private static void AddIecField(string fieldStr, Dictionary<string, object> dict)
+        {
+            if (string.IsNullOrWhiteSpace(fieldStr)) return;
+            int assignIdx = fieldStr.IndexOf(":=");
+            if (assignIdx > 0)
+            {
+                string key = fieldStr.Substring(0, assignIdx).Trim();
+                string val = fieldStr.Substring(assignIdx + 2).Trim();
+                dict[key] = NormalizeIecValue(val);
+            }
+        }
+
+        public static List<string> GetDutMembers(string typeOrVarName)
+        {
+            var members = new List<string>();
+            if (string.IsNullOrWhiteSpace(typeOrVarName)) return members;
+
+            try
+            {
+                string targetType = typeOrVarName.Trim();
+                if (targetType.Contains("."))
+                {
+                    string[] parts = targetType.Split('.');
+                    string pouName = parts[0];
+                    string varName = parts[parts.Length - 1];
+
+                    var pou = CodesysOperations.FindObjectByName(pouName);
+                    if (pou != null)
+                    {
+                        var content = CodesysOperations.ReadPou(pouName);
+                        if (!string.IsNullOrEmpty(content.declaration))
+                        {
+                            var varMatch = Regex.Match(content.declaration, $@"(?i)\b{Regex.Escape(varName)}\s*:\s*([a-zA-Z_][a-zA-Z0-9_]*)");
+                            if (varMatch.Success)
+                            {
+                                targetType = varMatch.Groups[1].Value.Trim();
+                            }
+                        }
+                    }
+                }
+
+                var dutObj = CodesysOperations.FindObjectByName(targetType);
+                if (dutObj != null)
+                {
+                    var dutContent = CodesysOperations.ReadPou(targetType);
+                    string decl = dutContent.declaration ?? "";
+                    var structMatch = Regex.Match(decl, @"(?is)\bSTRUCT\b(.*?)\bEND_STRUCT\b");
+                    if (structMatch.Success)
+                    {
+                        string body = structMatch.Groups[1].Value;
+                        var lines = body.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var rawLine in lines)
+                        {
+                            string line = rawLine.Trim();
+                            if (line.StartsWith("//") || line.StartsWith("(*")) continue;
+                            int commentIdx = line.IndexOf("//");
+                            if (commentIdx >= 0) line = line.Substring(0, commentIdx).Trim();
+
+                            var m = Regex.Match(line, @"^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:");
+                            if (m.Success)
+                            {
+                                string memberName = m.Groups[1].Value.Trim();
+                                if (!members.Contains(memberName))
+                                {
+                                    members.Add(memberName);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return members;
+        }
+
+        public static BatchWriteResult BatchWriteVariables(Dictionary<string, string> vars, bool verify = true, bool force = false)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var result = new BatchWriteResult();
+                if (vars == null || vars.Count == 0)
+                {
+                    result.success = true;
+                    result.message = "No variables provided for batch write.";
+                    return result;
+                }
+
+                result.totalCount = vars.Count;
+                var onlineApp = GetOrCreateOnlineApp();
+                var setPrep = onlineApp.GetType().GetMethod("set_prepared_value", new Type[] { typeof(string), typeof(string) });
+                if (setPrep == null)
+                    throw new InvalidOperationException("Method 'set_prepared_value' not found on online application.");
+
+                // Phase 1: Set prepared values in memory for single-cycle atomic write
+                foreach (var kvp in vars)
+                {
+                    var itemRes = new BatchWriteItemResult { target = kvp.Value };
+                    result.details[kvp.Key] = itemRes;
+                    try
+                    {
+                        setPrep.Invoke(onlineApp, new object[] { kvp.Key, kvp.Value ?? string.Empty });
+                    }
+                    catch (Exception ex)
+                    {
+                        itemRes.error = ex.InnerException?.Message ?? ex.Message;
+                        result.failedCount++;
+                    }
+                }
+
+                // Phase 2: Atomic commit to PLC cycle
+                try
+                {
+                    if (force)
+                    {
+                        var forceMethod = onlineApp.GetType().GetMethod("force_prepared_values");
+                        forceMethod?.Invoke(onlineApp, null);
+                        CodesysContext.LogToIde($"[FORCE] batch_write_variables: Forced {vars.Count} prepared values.");
+                    }
+                    else
+                    {
+                        var writeMethod = onlineApp.GetType().GetMethod("write_prepared_values");
+                        writeMethod?.Invoke(onlineApp, null);
+                        CodesysContext.LogToIde($"[WRITE] batch_write_variables: Wrote {vars.Count} prepared values atomically.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.success = false;
+                    result.message = "Failed to commit prepared values: " + (ex.InnerException?.Message ?? ex.Message);
+                    return result;
+                }
+
+                // Phase 3: Verification (if requested)
+                bool allMatch = true;
+                var readValMethod = onlineApp.GetType().GetMethod("read_value", new Type[] { typeof(string) });
+                if (verify && readValMethod != null && vars.Count > 0)
+                {
+                    // Allow PLC task cycle (typically 20-50ms) to commit and gateway monitoring cache to refresh
+                    System.Threading.Thread.Sleep(100);
+                }
+
+                foreach (var kvp in vars)
+                {
+                    var item = result.details[kvp.Key];
+                    if (item.error != null)
+                    {
+                        allMatch = false;
+                        continue;
+                    }
+
+                    if (verify && readValMethod != null)
+                    {
+                        try
+                        {
+                            var actual = readValMethod.Invoke(onlineApp, new object[] { kvp.Key })?.ToString();
+                            item.actual = actual;
+                            item.verified = ValuesMatch(actual, kvp.Value);
+                            
+                            // Retry up to 3 times (60ms each) to allow asynchronous gateway monitoring sync
+                            int attempts = 0;
+                            while (!item.verified && attempts < 3)
+                            {
+                                System.Threading.Thread.Sleep(60);
+                                actual = readValMethod.Invoke(onlineApp, new object[] { kvp.Key })?.ToString();
+                                item.actual = actual;
+                                item.verified = ValuesMatch(actual, kvp.Value);
+                                attempts++;
+                            }
+
+                            if (item.verified)
+                            {
+                                result.succeededCount++;
+                            }
+                            else
+                            {
+                                result.failedCount++;
+                                allMatch = false;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            item.error = "Readback failed: " + (ex.InnerException?.Message ?? ex.Message);
+                            result.failedCount++;
+                            allMatch = false;
+                        }
+                    }
+                    else
+                    {
+                        item.verified = true;
+                        result.succeededCount++;
+                    }
+                }
+
+                result.allVerified = allMatch;
+                result.success = (result.failedCount == 0);
+                result.message = $"Batch write complete: {result.succeededCount}/{result.totalCount} succeeded, {result.failedCount} failed.";
+                return result;
+            });
+        }
+
+        public static BatchWriteResult WriteStruct(string structName, object values, bool verify = true, bool force = false)
+        {
+            if (string.IsNullOrEmpty(structName))
+                throw new ArgumentException("Parameter 'structName' is required.");
+
+            var flatMap = new Dictionary<string, string>();
+            FlattenObject(structName, values, flatMap);
+
+            if (flatMap.Count == 0)
+            {
+                return new BatchWriteResult
+                {
+                    success = true,
+                    message = $"No member variables extracted from '{structName}'."
+                };
+            }
+
+            return BatchWriteVariables(flatMap, verify, force);
+        }
+
+        public static ReadArrayResult ReadArray(string arrayName, int startIndex, int count)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var result = new ReadArrayResult
+                {
+                    variable = arrayName,
+                    startIndex = startIndex,
+                    count = count
+                };
+
+                if (string.IsNullOrEmpty(arrayName))
+                {
+                    result.success = false;
+                    result.message = "Parameter 'arrayName' is required.";
+                    return result;
+                }
+
+                if (count <= 0)
+                {
+                    result.success = true;
+                    result.message = "Count is 0 or negative, returning empty array.";
+                    return result;
+                }
+
+                if (count > 1000)
+                {
+                    count = 1000;
+                    result.count = count;
+                }
+
+                var expressions = new List<string>(count);
+                for (int i = 0; i < count; i++)
+                {
+                    expressions.Add($"{arrayName}[{startIndex + i}]");
+                }
+
+                var readResult = ReadVariables(expressions);
+                result.success = readResult.success;
+                result.items = new List<string>(count);
+
+                for (int i = 0; i < count; i++)
+                {
+                    string expr = expressions[i];
+                    string val = null;
+                    if (readResult.values != null && readResult.values.TryGetValue(expr, out val))
+                    {
+                        result.items.Add(NormalizeIecValue(val));
+                    }
+                    else
+                    {
+                        result.items.Add(string.Empty);
+                    }
+                }
+
+                result.message = $"Successfully read {result.items.Count} array element(s) from '{arrayName}'.";
+                return result;
+            });
+        }
+
+        public static ReadStructResult ReadStruct(string structName, List<string> memberNames = null)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var result = new ReadStructResult
+                {
+                    variable = structName
+                };
+
+                if (string.IsNullOrEmpty(structName))
+                {
+                    result.success = false;
+                    result.message = "Parameter 'structName' is required.";
+                    return result;
+                }
+
+                var onlineApp = GetOrCreateOnlineApp();
+                var readValMethod = onlineApp.GetType().GetMethod("read_value", new Type[] { typeof(string) });
+                if (readValMethod == null)
+                    throw new InvalidOperationException("Method 'read_value' not found on online application.");
+
+                // 1. First attempt: Direct read_value on structName
+                try
+                {
+                    var rawVal = readValMethod.Invoke(onlineApp, new object[] { structName })?.ToString();
+                    result.rawText = rawVal;
+                    if (!string.IsNullOrEmpty(rawVal) && rawVal.Trim().StartsWith("(") && rawVal.Trim().EndsWith(")"))
+                    {
+                        var parsed = ParseIecStructString(rawVal);
+                        if (parsed.Count > 0)
+                        {
+                            result.values = parsed;
+                            result.success = true;
+                            result.message = $"Successfully read struct '{structName}' with {parsed.Count} field(s) via direct tuple.";
+                            return result;
+                        }
+                    }
+                }
+                catch { }
+
+                // 2. Second attempt: Auto-discover members if not provided
+                if (memberNames == null || memberNames.Count == 0)
+                {
+                    memberNames = GetDutMembers(structName);
+                }
+
+                if (memberNames != null && memberNames.Count > 0)
+                {
+                    var exprs = new List<string>();
+                    foreach (var m in memberNames)
+                    {
+                        exprs.Add($"{structName}.{m}");
+                    }
+
+                    var readRes = ReadVariables(exprs);
+                    foreach (var m in memberNames)
+                    {
+                        string expr = $"{structName}.{m}";
+                        string val = null;
+                        if (readRes.values != null && readRes.values.TryGetValue(expr, out val))
+                        {
+                            result.values[m] = NormalizeIecValue(val);
+                        }
+                    }
+
+                    result.success = true;
+                    result.message = $"Successfully read struct '{structName}' with {result.values.Count} member(s).";
+                    return result;
+                }
+
+                result.success = false;
+                result.message = $"Could not determine members for struct '{structName}'. Please provide memberNames or ensure DUT exists in project.";
+                return result;
             });
         }
 

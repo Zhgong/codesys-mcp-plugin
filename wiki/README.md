@@ -14,6 +14,7 @@
 | **第 03 章** | [`03_IEC_Data_Types_and_Trace_Automation.md`](file:///C:/Users/vboxuser/Desktop/Repos/codesys-plugin/wiki/03_IEC_Data_Types_and_Trace_Automation.md) | IEC 61131-3 数据类型归一化比对与动态 Trace 图表对象注入 |
 | **第 04 章** | [`04_Testing_Strategy_and_Fast_Loop.md`](file:///C:/Users/vboxuser/Desktop/Repos/codesys-plugin/wiki/04_Testing_Strategy_and_Fast_Loop.md) | 双循环测试体系：2.8 秒极速 SoftPLC 在线验证与 52 项核心单元测试 |
 | **第 05 章** | [`05_Dual_Repo_and_Gatekeeper_Governance.md`](file:///C:/Users/vboxuser/Desktop/Repos/codesys-plugin/wiki/05_Dual_Repo_and_Gatekeeper_Governance.md) | 双仓库治理与安全防泄漏门禁（Gatekeeper Hook & `.publicignore`） |
+| **第 06 章** | [`06_Recipe_and_Complex_Data_Engine.md`](file:///C:/Users/vboxuser/Desktop/Repos/codesys-plugin/wiki/06_Recipe_and_Complex_Data_Engine.md) | 配方与复杂数据引擎（两阶段原子提交、结构体/数组探测、三层测试矩阵） |
 
 ---
 

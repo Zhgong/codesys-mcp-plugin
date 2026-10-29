@@ -1116,6 +1116,31 @@ namespace CodesysMcp
             return CodesysOnlineHelper.UnforceVariables(expressions);
         }
 
+        public static BatchWriteResult BatchWriteVariables(Dictionary<string, string> vars, bool verify = true, bool force = false)
+        {
+            return CodesysOnlineHelper.BatchWriteVariables(vars, verify, force);
+        }
+
+        public static BatchWriteResult WriteStruct(string structName, object values, bool verify = true, bool force = false)
+        {
+            return CodesysOnlineHelper.WriteStruct(structName, values, verify, force);
+        }
+
+        public static ReadArrayResult ReadArray(string arrayName, int startIndex, int count)
+        {
+            return CodesysOnlineHelper.ReadArray(arrayName, startIndex, count);
+        }
+
+        public static ReadStructResult ReadStruct(string structName, List<string> memberNames = null)
+        {
+            return CodesysOnlineHelper.ReadStruct(structName, memberNames);
+        }
+
+        public static List<string> GetDutMembers(string dutName)
+        {
+            return CodesysOnlineHelper.GetDutMembers(dutName);
+        }
+
         public static object AddTraceVariable(string variableName, string traceName = "Trace")
         {
             return CodesysContext.RunOnPrimaryThread(() =>

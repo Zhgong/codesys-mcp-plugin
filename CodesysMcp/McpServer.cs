@@ -416,6 +416,48 @@ namespace CodesysMcp
                     string getTraceName = args.ContainsKey("trace_name") ? args["trace_name"]?.ToString() : "Trace";
                     return CodesysOperations.GetTraceInfo(getTraceName);
 
+                case "batch_write_variables":
+                    if (!args.ContainsKey("variables") || args["variables"] == null)
+                        throw new ArgumentException("Parameter 'variables' (Dictionary/Object) is required.");
+                    var varMap = new Dictionary<string, string>();
+                    CodesysOnlineHelper.FlattenObject("", args["variables"], varMap);
+                    bool bVerify = !args.ContainsKey("verify") || Convert.ToBoolean(args["verify"]);
+                    bool bForce = args.ContainsKey("force") && Convert.ToBoolean(args["force"]);
+                    return CodesysOperations.BatchWriteVariables(varMap, bVerify, bForce);
+
+                case "write_struct":
+                    if (!args.ContainsKey("struct_name") || string.IsNullOrEmpty(args["struct_name"]?.ToString()))
+                        throw new ArgumentException("Parameter 'struct_name' is required.");
+                    if (!args.ContainsKey("values") || args["values"] == null)
+                        throw new ArgumentException("Parameter 'values' is required.");
+                    string wsStructName = args["struct_name"].ToString();
+                    bool wsVerify = !args.ContainsKey("verify") || Convert.ToBoolean(args["verify"]);
+                    bool wsForce = args.ContainsKey("force") && Convert.ToBoolean(args["force"]);
+                    return CodesysOperations.WriteStruct(wsStructName, args["values"], wsVerify, wsForce);
+
+                case "read_struct":
+                    if (!args.ContainsKey("struct_name") || string.IsNullOrEmpty(args["struct_name"]?.ToString()))
+                        throw new ArgumentException("Parameter 'struct_name' is required.");
+                    string rsStructName = args["struct_name"].ToString();
+                    var rsMembers = new List<string>();
+                    if (args.ContainsKey("members"))
+                    {
+                        var arr = args["members"] as System.Collections.IEnumerable;
+                        if (arr != null)
+                        {
+                            foreach (var item in arr) if (item != null) rsMembers.Add(item.ToString());
+                        }
+                    }
+                    return CodesysOperations.ReadStruct(rsStructName, rsMembers.Count > 0 ? rsMembers : null);
+
+                case "read_array":
+                    if (!args.ContainsKey("variable_name") || string.IsNullOrEmpty(args["variable_name"]?.ToString()))
+                        throw new ArgumentException("Parameter 'variable_name' is required.");
+                    string raVarName = args["variable_name"].ToString();
+                    int raStart = args.ContainsKey("start_index") ? Convert.ToInt32(args["start_index"]) : 0;
+                    int raCount = args.ContainsKey("count") ? Convert.ToInt32(args["count"]) : 50;
+                    return CodesysOperations.ReadArray(raVarName, raStart, raCount);
+
                 case "diag_online":
                     var formsInfo = new List<string>();
                     try
@@ -493,6 +535,94 @@ namespace CodesysMcp
                     }
                     catch (Exception ex) { traceDiag.Add("TraceDiag Error: " + ex.Message); }
 
+                    var devDiag = new List<string>();
+                    try
+                    {
+                        var dev = CodesysOperations.FindObjectByName("Device");
+                        if (dev != null && CodesysContext.Online != null)
+                        {
+                            var createOnlineDev = CodesysContext.Online.GetType().GetMethod("create_online_device");
+                            if (createOnlineDev != null)
+                            {
+                                var oDev = createOnlineDev.Invoke(CodesysContext.Online, new object[] { dev });
+                                if (oDev != null)
+                                {
+                                    devDiag.Add("oDev Type: " + oDev.GetType().FullName);
+                                    try {
+                                        var getConn = oDev.GetType().GetMethod("get_connected");
+                                        devDiag.Add("oDev.get_connected() = " + getConn?.Invoke(oDev, null));
+                                        var conn = oDev.GetType().GetMethod("connect");
+                                        conn?.Invoke(oDev, null);
+                                        devDiag.Add("oDev.connect() invoked -> now get_connected() = " + getConn?.Invoke(oDev, null));
+                                    } catch (Exception ex) { devDiag.Add("connect err: " + (ex.InnerException?.Message ?? ex.Message)); }
+                                    foreach (var m in oDev.GetType().GetMethods())
+                                    {
+                                        if (m.DeclaringType != typeof(object))
+                                        {
+                                            var pList = new List<string>();
+                                            foreach (var p in m.GetParameters()) pList.Add(p.ParameterType.Name + " " + p.Name);
+                                            devDiag.Add($"Method: {m.Name}({string.Join(", ", pList)})");
+                                        }
+                                    }
+
+                                    if (args.ContainsKey("set_initial_user") && Convert.ToBoolean(args["set_initial_user"]))
+                                    {
+                                        try
+                                        {
+                                            var setInitUser = oDev.GetType().GetMethod("set_credentials_for_initial_user");
+                                            setInitUser?.Invoke(oDev, new object[] { "admin", "Admin123", true, false });
+                                            devDiag.Add("set_credentials_for_initial_user SUCCESS!");
+                                        }
+                                        catch (Exception uex)
+                                        {
+                                            devDiag.Add("set_credentials_for_initial_user ERR: " + uex.Message);
+                                        }
+                                    }
+                                }
+                            }
+
+                            foreach (var m in dev.GetType().GetMethods())
+                            {
+                                if (m.Name.Contains("communication"))
+                                {
+                                    devDiag.Add($"DevCommMethod: {m.Name}");
+                                    try
+                                    {
+                                        var comm = m.Invoke(dev, null);
+                                        if (comm != null)
+                                        {
+                                            foreach (var p in comm.GetType().GetProperties())
+                                            {
+                                                try { devDiag.Add($"CommProp: {p.Name} = {p.GetValue(comm, null)}"); } catch { }
+                                            }
+                                        }
+                                    }
+                                    catch (Exception cex) { devDiag.Add($"DevCommCallErr: {cex.Message}"); }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex) { devDiag.Add("DevDiag Error: " + ex.Message); }
+
+                    var appDiag = new List<string>();
+                    try
+                    {
+                        var onlineApp = CodesysOnlineHelper.GetCachedOnlineApp();
+                        if (onlineApp != null)
+                        {
+                            appDiag.Add("onlineApp Type: " + onlineApp.GetType().FullName);
+                            foreach (var p in onlineApp.GetType().GetProperties())
+                            {
+                                try { appDiag.Add($"Prop {p.Name} = {p.GetValue(onlineApp, null)}"); } catch (Exception pex) { appDiag.Add($"Prop {p.Name} Err = {pex.Message}"); }
+                            }
+                            foreach (var f in onlineApp.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public))
+                            {
+                                try { appDiag.Add($"Field {f.Name} = {f.GetValue(onlineApp)}"); } catch (Exception fex) { appDiag.Add($"Field {f.Name} Err = {fex.Message}"); }
+                            }
+                        }
+                    }
+                    catch (Exception aex) { appDiag.Add("AppDiag Err: " + aex.Message); }
+
                     return new
                     {
                         pipeThreadId = Thread.CurrentThread.ManagedThreadId,
@@ -502,6 +632,8 @@ namespace CodesysMcp
                         openForms = formsInfo,
                         onlineMethods,
                         traceDiag,
+                        devDiag,
+                        appDiag,
                         frameForm = ffInfo,
                         stackDiag = CodesysOnlineHelper.EnsureExecutionStack()
                     };
@@ -899,6 +1031,70 @@ namespace CodesysMcp
                         {
                             trace_name = new { type = "string", description = "Name of the Trace object in the project (defaults to 'Trace')" }
                         }
+                    }
+                },
+                new
+                {
+                    name = "batch_write_variables",
+                    description = "Write multiple PLC variables in a single scan cycle atomically, with optional readback verification.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            variables = new { type = "object", description = "Key-value map of variable expressions to target values (e.g. {'PLC_PRG.PressRecipe.rTargetForce': '5500.0', 'PLC_PRG.PressRecipe.rFastSpeed': '45.0'})" },
+                            verify = new { type = "boolean", description = "Whether to read back and verify each variable (defaults to true)" },
+                            force = new { type = "boolean", description = "Whether to force instead of write (defaults to false)" }
+                        },
+                        required = new[] { "variables" }
+                    }
+                },
+                new
+                {
+                    name = "write_struct",
+                    description = "Write a complete JSON struct or recipe object into a PLC STRUCT instance atomically in a single cycle.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            struct_name = new { type = "string", description = "Base variable path of the struct instance (e.g. 'PLC_PRG.PressRecipe')" },
+                            values = new { type = "object", description = "Object containing struct members and sub-members to write" },
+                            verify = new { type = "boolean", description = "Whether to read back and verify written members (defaults to true)" },
+                            force = new { type = "boolean", description = "Whether to force instead of write (defaults to false)" }
+                        },
+                        required = new[] { "struct_name", "values" }
+                    }
+                },
+                new
+                {
+                    name = "read_struct",
+                    description = "Read all members of a PLC STRUCT instance, either via direct tuple parsing or automatic DUT member discovery.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            struct_name = new { type = "string", description = "Base variable path of the struct instance (e.g. 'PLC_PRG.PressRecipe')" },
+                            members = new { type = "array", items = new { type = "string" }, description = "Optional explicit list of member names. If omitted, members are automatically discovered from project DUT definitions." }
+                        },
+                        required = new[] { "struct_name" }
+                    }
+                },
+                new
+                {
+                    name = "read_array",
+                    description = "Batch read a slice of elements from a PLC array variable efficiently.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            variable_name = new { type = "string", description = "Name of the array variable (e.g. 'PLC_PRG.aPositionBuffer')" },
+                            start_index = new { type = "integer", description = "Starting 0-based index (defaults to 0)" },
+                            count = new { type = "integer", description = "Number of elements to read (defaults to 50, max 1000)" }
+                        },
+                        required = new[] { "variable_name" }
                     }
                 }
             };

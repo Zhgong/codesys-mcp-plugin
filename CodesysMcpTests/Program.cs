@@ -89,7 +89,8 @@ namespace CodesysMcpTests
                 typeof(SearchEngineTests),
                 typeof(DiffEngineTests),
                 typeof(DiffViewerTests),
-                typeof(OnlineTests)
+                typeof(OnlineTests),
+                typeof(BatchRecipeTests)
             };
 
             int passed = 0;
