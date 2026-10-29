@@ -405,6 +405,17 @@ namespace CodesysMcp
                     }
                     return CodesysOperations.UnforceVariables(unforceList);
 
+                case "add_trace_variable":
+                    if (!args.ContainsKey("variable_name") || string.IsNullOrEmpty(args["variable_name"]?.ToString()))
+                        throw new ArgumentException("Parameter 'variable_name' is required.");
+                    string tVarName = args["variable_name"].ToString();
+                    string tTraceName = args.ContainsKey("trace_name") ? args["trace_name"]?.ToString() : "Trace";
+                    return CodesysOperations.AddTraceVariable(tVarName, tTraceName);
+
+                case "get_trace_info":
+                    string getTraceName = args.ContainsKey("trace_name") ? args["trace_name"]?.ToString() : "Trace";
+                    return CodesysOperations.GetTraceInfo(getTraceName);
+
                 case "diag_online":
                     var formsInfo = new List<string>();
                     try
@@ -463,6 +474,25 @@ namespace CodesysMcp
                     }
                     catch (Exception ex) { ffInfo = "FrameForm error: " + ex.Message; }
 
+                    var traceDiag = new List<string>();
+                    try
+                    {
+                        var tObj = CodesysOperations.FindObjectByName("Trace");
+                        if (tObj != null)
+                        {
+                            traceDiag.Add("TraceObj Type: " + tObj.GetType().FullName);
+                            foreach (var p in tObj.GetType().GetProperties())
+                            {
+                                try { traceDiag.Add($"Prop {p.Name} = {p.GetValue(tObj, null)}"); } catch { }
+                            }
+                        }
+                        else
+                        {
+                            traceDiag.Add("Trace object not found");
+                        }
+                    }
+                    catch (Exception ex) { traceDiag.Add("TraceDiag Error: " + ex.Message); }
+
                     return new
                     {
                         pipeThreadId = Thread.CurrentThread.ManagedThreadId,
@@ -471,6 +501,7 @@ namespace CodesysMcp
                         openFormsCount = System.Windows.Forms.Application.OpenForms.Count,
                         openForms = formsInfo,
                         onlineMethods,
+                        traceDiag,
                         frameForm = ffInfo,
                         stackDiag = CodesysOnlineHelper.EnsureExecutionStack()
                     };
@@ -839,6 +870,34 @@ namespace CodesysMcp
                                 items = new { type = "string" },
                                 description = "Optional list of expressions to unforce. If omitted, unforces all currently forced expressions."
                             }
+                        }
+                    }
+                },
+                new
+                {
+                    name = "add_trace_variable",
+                    description = "Add a variable expression to a CODESYS Trace object and diagram (e.g. 'MOTION_PRG.PressRecipe.rTargetForce').",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            variable_name = new { type = "string", description = "IEC variable expression to trace (e.g. 'MOTION_PRG.PressRecipe.rTargetForce', 'MOTION_PRG.rDispPos')" },
+                            trace_name = new { type = "string", description = "Name of the Trace object in the project (defaults to 'Trace')" }
+                        },
+                        required = new[] { "variable_name" }
+                    }
+                },
+                new
+                {
+                    name = "get_trace_info",
+                    description = "Get information and variable list from a CODESYS Trace object.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            trace_name = new { type = "string", description = "Name of the Trace object in the project (defaults to 'Trace')" }
                         }
                     }
                 }

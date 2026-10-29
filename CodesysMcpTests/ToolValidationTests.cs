@@ -30,7 +30,7 @@ namespace CodesysMcpTests
 
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools, "tools array should not be null");
-            Assert.AreEqual(23, tools.Count, "Expected exactly 23 registered tools");
+            Assert.AreEqual(25, tools.Count, "Expected exactly 25 registered tools");
 
             var expectedTools = new HashSet<string>
             {
@@ -56,7 +56,9 @@ namespace CodesysMcpTests
                 "plc_control",
                 "read_variables",
                 "write_variable",
-                "unforce_variables"
+                "unforce_variables",
+                "add_trace_variable",
+                "get_trace_info"
             };
 
             foreach (Dictionary<string, object> tool in tools)
@@ -265,6 +267,21 @@ namespace CodesysMcpTests
             Assert.IsTrue(Convert.ToBoolean(prevRes["success"]));
             Assert.AreEqual(0, Convert.ToInt32(prevRes["modifiedCount"]));
             Assert.IsTrue(prevRes["message"] != null && prevRes["message"].ToString().Contains("No modified POUs"));
+        }
+
+        [TestMethod]
+        public void TestAddTraceVariableWithoutVariableNameFailsValidation()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 17, \"method\": \"tools/call\", \"params\": {\"name\": \"add_trace_variable\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]), "isError should be true when missing 'variable_name'");
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            Assert.Contains("variable_name", firstItem["text"]?.ToString());
         }
     }
 }

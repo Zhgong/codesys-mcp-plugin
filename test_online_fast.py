@@ -171,6 +171,25 @@ def main():
         dump_diagnostics()
         sys.exit(1)
 
+    # 5b. Add Trace Variable & Verify Trace Info
+    print("\n[4b] Adding trace variable `MOTION_PRG.PressRecipe.rTargetForce` (`add_trace_variable`)...")
+    err, trace_res, ms = call_mcp_tool("add_trace_variable", {
+        "variable_name": "MOTION_PRG.PressRecipe.rTargetForce"
+    })
+    print(f"    Result ({ms:.0f}ms): {json.dumps(trace_res, ensure_ascii=False)}")
+    if err:
+        print("    [FAIL] add_trace_variable failed!")
+        dump_diagnostics()
+        sys.exit(1)
+
+    print("\n[4c] Inspecting Trace configuration (`get_trace_info`)...")
+    err, tinfo, ms = call_mcp_tool("get_trace_info", {"trace_name": "Trace"})
+    print(f"    Result ({ms:.0f}ms): {json.dumps(tinfo, ensure_ascii=False)}")
+    if err or not isinstance(tinfo, dict) or "MOTION_PRG.PressRecipe.rTargetForce" not in tinfo.get("variables", []):
+        print("    [FAIL] get_trace_info did not return the expected variables!")
+        dump_diagnostics()
+        sys.exit(1)
+
     # 6. PLC Control: STOP -> START
     print("\n[5] Testing `plc_control` (STOP -> START)...")
     err, stop_res, ms_stop = call_mcp_tool("plc_control", {"action": "stop"})

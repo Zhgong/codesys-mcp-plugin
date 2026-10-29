@@ -38,6 +38,40 @@ namespace CodesysMcp
     {
         private static object _cachedOnlineApp;
 
+        public static string NormalizeIecValue(string raw)
+        {
+            if (raw == null) return string.Empty;
+            string s = raw.Trim();
+            int hashIdx = s.IndexOf('#');
+            if (hashIdx >= 0)
+            {
+                s = s.Substring(hashIdx + 1).Trim();
+            }
+            return s;
+        }
+
+        public static bool ValuesMatch(string actual, string target)
+        {
+            string normActual = NormalizeIecValue(actual);
+            string normTarget = NormalizeIecValue(target);
+
+            if (string.Equals(normActual, normTarget, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (double.TryParse(normActual, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d1) &&
+                double.TryParse(normTarget, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2))
+            {
+                return Math.Abs(d1 - d2) < 0.001;
+            }
+
+            if (bool.TryParse(normActual, out var b1) && bool.TryParse(normTarget, out var b2))
+            {
+                return b1 == b2;
+            }
+
+            return false;
+        }
+
         public static void ClearSession()
         {
             try
@@ -529,22 +563,7 @@ namespace CodesysMcp
                     actual = readValMethod?.Invoke(onlineApp, new object[] { name })?.ToString();
                     if (actual != null)
                     {
-                        string normActual = actual.Trim();
-                        if (normActual.Contains("#"))
-                        {
-                            normActual = normActual.Substring(normActual.IndexOf('#') + 1).Trim();
-                        }
-                        string normTarget = (value ?? string.Empty).Trim();
-                        if (normTarget.Contains("#"))
-                        {
-                            normTarget = normTarget.Substring(normTarget.IndexOf('#') + 1).Trim();
-                        }
-
-                        verified = string.Equals(normActual, normTarget, StringComparison.OrdinalIgnoreCase) ||
-                                   (double.TryParse(normActual, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d1) &&
-                                    double.TryParse(normTarget, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2) &&
-                                    Math.Abs(d1 - d2) < 0.001) ||
-                                   (bool.TryParse(normActual, out var b1) && bool.TryParse(normTarget, out var b2) && b1 == b2);
+                        verified = ValuesMatch(actual, value);
                     }
                 }
                 catch { }

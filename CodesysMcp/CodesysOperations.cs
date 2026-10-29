@@ -1115,5 +1115,180 @@ namespace CodesysMcp
         {
             return CodesysOnlineHelper.UnforceVariables(expressions);
         }
+
+        public static object AddTraceVariable(string variableName, string traceName = "Trace")
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                if (string.IsNullOrEmpty(variableName))
+                    throw new ArgumentException("Parameter 'variable_name' is required.");
+
+                var tObj = FindObjectByName(traceName ?? "Trace");
+                if (tObj == null)
+                    throw new FileNotFoundException($"Trace object '{traceName}' not found in active project.");
+
+                object traceExt = null;
+                var extProp = tObj.GetType().GetProperty("Extensions");
+                if (extProp != null)
+                {
+                    var exts = extProp.GetValue(tObj, null) as System.Collections.IEnumerable;
+                    if (exts != null)
+                    {
+                        foreach (var item in exts)
+                        {
+                            if (item != null && item.GetType().Name.Contains("TraceObject"))
+                            {
+                                traceExt = item;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (traceExt == null)
+                    throw new InvalidOperationException("ScriptTraceObject extension not found on Trace object.");
+
+                var varListProp = traceExt.GetType().GetProperty("variable_list");
+                var varList = varListProp?.GetValue(traceExt, null);
+                if (varList == null)
+                    throw new InvalidOperationException("variable_list property not found on ScriptTraceObject.");
+
+                var getEnumeratorMethod = varList.GetType().GetMethod("GetEnumerator");
+                var enumerator = getEnumeratorMethod?.Invoke(varList, null) as System.Collections.IEnumerator;
+                object existingVar = null;
+                if (enumerator != null)
+                {
+                    while (enumerator.MoveNext())
+                    {
+                        var cur = enumerator.Current;
+                        if (cur != null)
+                        {
+                            var nameProp = cur.GetType().GetProperty("variable_name");
+                            string curName = nameProp?.GetValue(cur, null)?.ToString();
+                            if (string.Equals(curName, variableName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                existingVar = cur;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                object targetVar = existingVar;
+                bool addedNew = false;
+                if (targetVar == null)
+                {
+                    var addMethod = varList.GetType().GetMethod("add", Type.EmptyTypes);
+                    if (addMethod == null)
+                        throw new InvalidOperationException("add() method not found on variable_list.");
+                    targetVar = addMethod.Invoke(varList, null);
+                    var varNameProp = targetVar.GetType().GetProperty("variable_name");
+                    varNameProp?.SetValue(targetVar, variableName, null);
+                    addedNew = true;
+                }
+
+                var diagramsProp = traceExt.GetType().GetProperty("diagrams");
+                var diagrams = diagramsProp?.GetValue(traceExt, null) as System.Collections.IEnumerable;
+                int diagCount = 0;
+                if (diagrams != null)
+                {
+                    foreach (var diag in diagrams)
+                    {
+                        diagCount++;
+                        try
+                        {
+                            var addDiagVar = diag.GetType().GetMethod("add_diagram_variable");
+                            if (addDiagVar != null)
+                            {
+                                addDiagVar.Invoke(diag, new object[] { targetVar, false });
+                            }
+                        }
+                        catch { }
+                    }
+                }
+
+                CodesysContext.LogToIde($"[SUCCESS] add_trace_variable: Added '{variableName}' to Trace '{traceName}' (Diagrams updated: {diagCount})");
+                return new
+                {
+                    success = true,
+                    traceName = traceName ?? "Trace",
+                    variableName,
+                    addedNew,
+                    diagramsUpdated = diagCount,
+                    message = $"Successfully added '{variableName}' to Trace '{traceName}'."
+                };
+            });
+        }
+
+        public static object GetTraceInfo(string traceName = "Trace")
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var tObj = FindObjectByName(traceName ?? "Trace");
+                if (tObj == null)
+                    throw new FileNotFoundException($"Trace object '{traceName}' not found in active project.");
+
+                object traceExt = null;
+                var extProp = tObj.GetType().GetProperty("Extensions");
+                if (extProp != null)
+                {
+                    var exts = extProp.GetValue(tObj, null) as System.Collections.IEnumerable;
+                    if (exts != null)
+                    {
+                        foreach (var item in exts)
+                        {
+                            if (item != null && item.GetType().Name.Contains("TraceObject"))
+                            {
+                                traceExt = item;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (traceExt == null)
+                    throw new InvalidOperationException("ScriptTraceObject extension not found on Trace object.");
+
+                var varListProp = traceExt.GetType().GetProperty("variable_list");
+                var varList = varListProp?.GetValue(traceExt, null);
+                var variables = new List<string>();
+                if (varList != null)
+                {
+                    var getEnumeratorMethod = varList.GetType().GetMethod("GetEnumerator");
+                    var enumerator = getEnumeratorMethod?.Invoke(varList, null) as System.Collections.IEnumerator;
+                    if (enumerator != null)
+                    {
+                        while (enumerator.MoveNext())
+                        {
+                            var cur = enumerator.Current;
+                            if (cur != null)
+                            {
+                                var nameProp = cur.GetType().GetProperty("variable_name");
+                                string curName = nameProp?.GetValue(cur, null)?.ToString();
+                                if (!string.IsNullOrEmpty(curName))
+                                    variables.Add(curName);
+                            }
+                        }
+                    }
+                }
+
+                var diagramsProp = traceExt.GetType().GetProperty("diagrams");
+                var diagrams = diagramsProp?.GetValue(traceExt, null) as System.Collections.IEnumerable;
+                int diagCount = 0;
+                if (diagrams != null)
+                {
+                    foreach (var diag in diagrams) diagCount++;
+                }
+
+                return new
+                {
+                    success = true,
+                    traceName = traceName ?? "Trace",
+                    variableCount = variables.Count,
+                    variables,
+                    diagramCount = diagCount
+                };
+            });
+        }
     }
 }
