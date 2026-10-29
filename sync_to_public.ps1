@@ -15,7 +15,7 @@ param (
     [switch]$FilterIgnored = $false
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 if (-not $Branch) {
