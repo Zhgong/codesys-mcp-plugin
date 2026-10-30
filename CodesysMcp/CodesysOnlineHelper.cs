@@ -12,6 +12,9 @@ namespace CodesysMcp
         public bool isLoggedIn { get; set; }
         public string applicationState { get; set; } = "Unknown";
         public string operationState { get; set; } = "Unknown";
+        public bool isException { get; set; } = false;
+        public string exceptionDetails { get; set; }
+        public List<string> decodedOperationFlags { get; set; } = new List<string>();
         public string activeApplication { get; set; }
         public List<string> forcedExpressions { get; set; } = new List<string>();
         public string message { get; set; }
@@ -352,6 +355,31 @@ namespace CodesysMcp
                     var opStateVal = GetMemberValue(_cachedOnlineApp, "operation_state");
                     res.operationState = opStateVal?.ToString() ?? "Unknown";
 
+                    // Decode operationState bitmask and detect IEC runtime exceptions (bit 0x0020 = 32)
+                    if (int.TryParse(res.operationState, out int opCode))
+                    {
+                        if ((opCode & 0x0001) != 0) res.decodedOperationFlags.Add("ProgramLoaded");
+                        if ((opCode & 0x0002) != 0) res.decodedOperationFlags.Add("DebugActive");
+                        if ((opCode & 0x0004) != 0) res.decodedOperationFlags.Add("ForceActive");
+                        if ((opCode & 0x0008) != 0) res.decodedOperationFlags.Add("FlowActive");
+                        if ((opCode & 0x0010) != 0) res.decodedOperationFlags.Add("BreakpointHit");
+                        if ((opCode & 0x0020) != 0)
+                        {
+                            res.decodedOperationFlags.Add("Exception");
+                            res.isException = true;
+                        }
+                        if ((opCode & 0x1000) != 0) res.decodedOperationFlags.Add("OnlineConnected");
+                    }
+                    if (res.applicationState.IndexOf("exception", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        res.isException = true;
+                    }
+
+                    if (res.isException)
+                    {
+                        res.exceptionDetails = $"CRITICAL: CODESYS PLC Runtime Exception detected! (State: {res.applicationState}, Operation: {res.operationState} [{string.Join("|", res.decodedOperationFlags)}]). Program execution is halted.";
+                    }
+
                     var forcedProp = _cachedOnlineApp.GetType().GetMethod("get_forced_expressions");
                     if (forcedProp != null)
                     {
@@ -365,9 +393,16 @@ namespace CodesysMcp
                         }
                     }
 
-                    res.message = res.isLoggedIn
-                        ? $"Connected to PLC (State: {res.applicationState}, Operation: {res.operationState})."
-                        : "Online application session is disconnected.";
+                    if (res.isException)
+                    {
+                        res.message = res.exceptionDetails;
+                    }
+                    else
+                    {
+                        res.message = res.isLoggedIn
+                            ? $"Connected to PLC (State: {res.applicationState}, Operation: {res.operationState} [{string.Join("|", res.decodedOperationFlags)}])."
+                            : "Online application session is disconnected.";
+                    }
                 }
                 catch (Exception ex)
                 {
