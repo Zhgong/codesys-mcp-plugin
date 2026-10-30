@@ -137,13 +137,20 @@ namespace CodesysMcp
         public DateTime timestamp { get; set; }
         public string severity { get; set; }
         public string component { get; set; }
+        public string user { get; set; }
+        public string infoId { get; set; }
         public string message { get; set; }
     }
 
     public class DeviceLogResult
     {
         public bool success { get; set; }
+        public string source { get; set; }
         public int totalEntries { get; set; }
+        public int infoCount { get; set; }
+        public int warningCount { get; set; }
+        public int errorCount { get; set; }
+        public int exceptionCount { get; set; }
         public List<DeviceLogEntryDto> entries { get; set; } = new List<DeviceLogEntryDto>();
         public string message { get; set; }
     }
@@ -1156,22 +1163,23 @@ VAR_INPUT
     nLevel  : INT := 1; // 1: INFO, 2: WARNING, 3: ERROR
 END_VAR
 VAR
-    udiClass : UDINT;
+    udiClassID : UDINT;
 END_VAR";
 
             string impl = @"CASE nLevel OF
-    2: udiClass := 16#00000002; // CmpLog.LogClass.LOG_WARNING
-    3: udiClass := 16#00000004; // CmpLog.LogClass.LOG_ERROR
+    2: udiClassID := 16#00000002; // LOG_WARNING
+    3: udiClassID := 16#00000004; // LOG_ERROR
 ELSE
-    udiClass := 16#00000001; // CmpLog.LogClass.LOG_INFO
+    udiClassID := 16#00000001; // LOG_INFO
 END_CASE;
 
-CmpLog.LogAdd(
-    hLogger    := 16#FFFFFFFF, // RTS_INVALID_HANDLE -> default PLC logger
-    udiClass   := udiClass,
+CmpLog.LogAdd2(
+    hLogger    := CmpLog.LogConstants.LOG_STD_LOGGER,
+    udiCmpID   := 0,
+    udiClassID := udiClassID,
     udiErrorID := 0,
     udiInfoID  := 0,
-    pszInfo    := ADR(sMsg)
+    pszInfo    := sMsg
 );
 FC_LogMsg := TRUE;";
 
@@ -1399,18 +1407,177 @@ FC_LogMsg := TRUE;";
             return new DeviceLogResult
             {
                 success = false,
-                message = "Cannot read device logs when no online session is active."
+                source = "offline",
+                message = "Cannot read device logs when no online session is active. You can specify 'file_path' to parse an exported log XML file."
             };
         }
 
-        public static DeviceLogResult ReadDeviceLog(string severityFilter = null, string keyword = null, int maxEntries = 50)
+        public static DeviceLogResult ParseDeviceLogXml(string filePathOrXml, string severityFilter = null, string keyword = null, string componentFilter = null, int maxEntries = 50)
         {
+            var res = new DeviceLogResult();
+            res.source = "file";
+            try
+            {
+                if (string.IsNullOrEmpty(filePathOrXml))
+                {
+                    res.success = false;
+                    res.message = "No XML file path or XML content provided.";
+                    return res;
+                }
+
+                var doc = new System.Xml.XmlDocument();
+                if (System.IO.File.Exists(filePathOrXml))
+                {
+                    doc.Load(filePathOrXml);
+                    res.source = "file: " + System.IO.Path.GetFileName(filePathOrXml);
+                }
+                else
+                {
+                    doc.LoadXml(filePathOrXml);
+                    res.source = "xml_content";
+                }
+
+                var entryNodes = doc.SelectNodes("//Entry");
+                if (entryNodes == null || entryNodes.Count == 0)
+                {
+                    res.success = true;
+                    res.message = "XML parsed successfully, but no <Entry> elements found.";
+                    return res;
+                }
+
+                var allEntries = new List<DeviceLogEntryDto>();
+                int totalInfo = 0, totalWarn = 0, totalErr = 0, totalExc = 0;
+
+                foreach (System.Xml.XmlNode node in entryNodes)
+                {
+                    if (node == null) continue;
+                    var dto = new DeviceLogEntryDto();
+                    dto.severity = node.Attributes?["severity"]?.Value ?? "information";
+                    dto.component = node.Attributes?["component"]?.Value ?? "";
+                    dto.user = node.Attributes?["user"]?.Value ?? "nobody";
+                    dto.infoId = node.Attributes?["infoId"]?.Value ?? "0";
+                    dto.message = node.InnerText != null ? node.InnerText.Trim() : "";
+
+                    string tsStr = node.Attributes?["timestamp"]?.Value;
+                    if (DateTime.TryParse(tsStr, out DateTime dt))
+                    {
+                        dto.timestamp = dt;
+                    }
+                    else
+                    {
+                        dto.timestamp = DateTime.MinValue;
+                    }
+
+                    string sevLower = dto.severity.ToLowerInvariant();
+                    if (sevLower.Contains("error")) totalErr++;
+                    else if (sevLower.Contains("warn")) totalWarn++;
+                    else if (sevLower.Contains("exception")) totalExc++;
+                    else totalInfo++;
+
+                    if (!string.IsNullOrEmpty(severityFilter) && !sevLower.Contains(severityFilter.Trim().ToLowerInvariant()))
+                        continue;
+
+                    if (!string.IsNullOrEmpty(componentFilter) && (dto.component == null || dto.component.IndexOf(componentFilter.Trim(), StringComparison.OrdinalIgnoreCase) < 0))
+                        continue;
+
+                    if (!string.IsNullOrEmpty(keyword) &&
+                        (dto.message == null || dto.message.IndexOf(keyword.Trim(), StringComparison.OrdinalIgnoreCase) < 0) &&
+                        (dto.component == null || dto.component.IndexOf(keyword.Trim(), StringComparison.OrdinalIgnoreCase) < 0))
+                        continue;
+
+                    allEntries.Add(dto);
+                }
+
+                res.totalEntries = entryNodes.Count;
+                res.infoCount = totalInfo;
+                res.warningCount = totalWarn;
+                res.errorCount = totalErr;
+                res.exceptionCount = totalExc;
+
+                if (maxEntries > 0 && allEntries.Count > maxEntries)
+                {
+                    res.entries = allEntries.Take(maxEntries).ToList();
+                }
+                else
+                {
+                    res.entries = allEntries;
+                }
+
+                res.success = true;
+                res.message = $"Successfully parsed {entryNodes.Count} total entries (matched {allEntries.Count}; returning {res.entries.Count}; Stats: {totalInfo} Info, {totalWarn} Warn, {totalErr} Error, {totalExc} Exception).";
+                return res;
+            }
+            catch (Exception ex)
+            {
+                res.success = false;
+                res.message = $"Failed to parse device log XML: {ex.Message}";
+                return res;
+            }
+        }
+
+        public static void ExportDeviceLogToXml(List<DeviceLogEntryDto> entries, string outputPath, string loggerName = "PlcLog")
+        {
+            var doc = new System.Xml.XmlDocument();
+            var dec = doc.CreateXmlDeclaration("1.0", "utf-8", null);
+            doc.AppendChild(dec);
+
+            var root = doc.CreateElement("LoggerEntries");
+            doc.AppendChild(root);
+
+            var logger = doc.CreateElement("Logger");
+            logger.SetAttribute("name", loggerName);
+            root.AppendChild(logger);
+
+            if (entries != null)
+            {
+                foreach (var e in entries)
+                {
+                    var entryNode = doc.CreateElement("Entry");
+                    entryNode.SetAttribute("severity", e.severity ?? "information");
+                    entryNode.SetAttribute("component", e.component ?? "");
+                    entryNode.SetAttribute("user", e.user ?? "nobody");
+                    entryNode.SetAttribute("timestamp", e.timestamp != DateTime.MinValue ? e.timestamp.ToString("yyyy/MM/dd HH:mm:ss") : DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss"));
+                    entryNode.SetAttribute("infoId", e.infoId ?? "0");
+                    entryNode.InnerText = e.message ?? "";
+                    logger.AppendChild(entryNode);
+                }
+            }
+
+            var dir = System.IO.Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrEmpty(dir) && !System.IO.Directory.Exists(dir))
+            {
+                System.IO.Directory.CreateDirectory(dir);
+            }
+            doc.Save(outputPath);
+        }
+
+        public static DeviceLogResult ReadDeviceLog(string filePath = null, string severityFilter = null, string keyword = null, string componentFilter = null, int maxEntries = 50, string saveToPath = null)
+        {
+            if (!string.IsNullOrEmpty(filePath))
+            {
+                var fileRes = ParseDeviceLogXml(filePath, severityFilter, keyword, componentFilter, maxEntries);
+                if (fileRes.success && !string.IsNullOrEmpty(saveToPath))
+                {
+                    try
+                    {
+                        ExportDeviceLogToXml(fileRes.entries, saveToPath);
+                        fileRes.message += $" Exported matching entries to '{saveToPath}'.";
+                    }
+                    catch (Exception ex)
+                    {
+                        fileRes.message += $" (Export failed: {ex.Message})";
+                    }
+                }
+                return fileRes;
+            }
+
             return CodesysContext.RunOnPrimaryThread(() =>
             {
                 var proj = CodesysContext.PrimaryProject;
                 if (proj == null) return ReadDeviceLogOfflineSafe();
 
                 var res = new DeviceLogResult();
+                res.source = "online";
 
                 dynamic onlineModule = CodesysContext.Online;
                 if (onlineModule == null)
@@ -1508,9 +1675,13 @@ FC_LogMsg := TRUE;";
                     if (entries != null)
                     {
                         var dtoList = new List<DeviceLogEntryDto>();
+                        int totalInfo = 0, totalWarn = 0, totalErr = 0, totalExc = 0;
+                        int totalRaw = 0;
+
                         foreach (var entry in entries)
                         {
                             if (entry == null) continue;
+                            totalRaw++;
                             var dto = new DeviceLogEntryDto();
                             try { dto.timestamp = (DateTime)entry.TimeStamp; } catch { dto.timestamp = DateTime.Now; }
                             try { dto.message = entry.Info?.ToString() ?? ""; } catch { dto.message = ""; }
@@ -1522,13 +1693,27 @@ FC_LogMsg := TRUE;";
                             }
                             catch { dto.severity = "Info"; }
 
-                            if (!string.IsNullOrEmpty(severityFilter) && !dto.severity.Equals(severityFilter, StringComparison.OrdinalIgnoreCase))
+                            string sevLower = dto.severity.ToLowerInvariant();
+                            if (sevLower.Contains("error")) totalErr++;
+                            else if (sevLower.Contains("warn")) totalWarn++;
+                            else if (sevLower.Contains("exception")) totalExc++;
+                            else totalInfo++;
+
+                            if (!string.IsNullOrEmpty(severityFilter) && !sevLower.Contains(severityFilter.Trim().ToLowerInvariant()))
                                 continue;
-                            if (!string.IsNullOrEmpty(keyword) && (dto.message == null || dto.message.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) < 0))
+                            if (!string.IsNullOrEmpty(componentFilter) && (dto.component == null || dto.component.IndexOf(componentFilter.Trim(), StringComparison.OrdinalIgnoreCase) < 0))
+                                continue;
+                            if (!string.IsNullOrEmpty(keyword) && (dto.message == null || dto.message.IndexOf(keyword.Trim(), StringComparison.OrdinalIgnoreCase) < 0))
                                 continue;
 
                             dtoList.Add(dto);
                         }
+
+                        res.totalEntries = totalRaw;
+                        res.infoCount = totalInfo;
+                        res.warningCount = totalWarn;
+                        res.errorCount = totalErr;
+                        res.exceptionCount = totalExc;
 
                         if (maxEntries > 0 && dtoList.Count > maxEntries)
                         {
@@ -1536,9 +1721,22 @@ FC_LogMsg := TRUE;";
                         }
 
                         res.entries = dtoList;
-                        res.totalEntries = dtoList.Count;
                         res.success = true;
-                        res.message = $"Successfully read {dtoList.Count} device log entries.";
+                        res.message = $"Successfully read {totalRaw} device log entries (returning {dtoList.Count}; Stats: {totalInfo} Info, {totalWarn} Warn, {totalErr} Error, {totalExc} Exception).";
+
+                        if (!string.IsNullOrEmpty(saveToPath))
+                        {
+                            try
+                            {
+                                ExportDeviceLogToXml(dtoList, saveToPath, targetName);
+                                res.message += $" Exported entries to '{saveToPath}'.";
+                            }
+                            catch (Exception ex)
+                            {
+                                res.message += $" (Export failed: {ex.Message})";
+                            }
+                        }
+
                         return res;
                     }
                 }

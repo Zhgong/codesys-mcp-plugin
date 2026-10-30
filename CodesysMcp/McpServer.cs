@@ -974,10 +974,13 @@ namespace CodesysMcp
                     return CodesysOperations.InjectCodeLog(icPou, icPattern, icMsg, icLevel, icAfter);
 
                 case "read_device_log":
+                    string rdFile = args.ContainsKey("file_path") ? args["file_path"]?.ToString() : null;
                     string rdSev = args.ContainsKey("severity") ? args["severity"]?.ToString() : null;
                     string rdKey = args.ContainsKey("keyword") ? args["keyword"]?.ToString() : null;
+                    string rdComp = args.ContainsKey("component") ? args["component"]?.ToString() : null;
                     int rdMax = args.ContainsKey("max_entries") ? Convert.ToInt32(args["max_entries"]) : 50;
-                    return CodesysOperations.ReadDeviceLog(rdSev, rdKey, rdMax);
+                    string rdSave = args.ContainsKey("save_to_path") ? args["save_to_path"]?.ToString() : null;
+                    return CodesysOperations.ReadDeviceLog(rdFile, rdSev, rdKey, rdComp, rdMax, rdSave);
 
 
 
@@ -2397,15 +2400,18 @@ new
                 new
                 {
                     name = "read_device_log",
-                    description = "Read real-time PLC Device / System Event logs from CODESYS runtime (CmpLog/Logger) with optional severity and keyword filtering.",
+                    description = "Read real-time PLC Device / System Event logs from CODESYS runtime (CmpLog/Logger) or parse an exported log XML file with optional severity, component, and keyword filtering.",
                     inputSchema = new
                     {
                         type = "object",
                         properties = new
                         {
-                            severity = new { type = "string", description = "Optional severity filter (e.g. 'Info', 'Warning', 'Error')" },
-                            keyword = new { type = "string", description = "Optional keyword to match in message text" },
-                            max_entries = new { type = "integer", description = "Maximum number of recent entries to return (defaults to 50)" }
+                            file_path = new { type = "string", description = "Optional path to an exported log XML file (e.g. 'C:\\Users\\vboxuser\\Desktop\\log.xml'). If omitted, attempts to read online logs directly from active PLC." },
+                            severity = new { type = "string", description = "Optional severity filter (e.g. 'information', 'warning', 'error', 'exception')" },
+                            keyword = new { type = "string", description = "Optional keyword to match in message text or component" },
+                            component = new { type = "string", description = "Optional component filter (e.g. 'CM', 'CmpSupervisor', 'CmpApp')" },
+                            max_entries = new { type = "integer", description = "Maximum number of recent entries to return (defaults to 50, 0 for all)" },
+                            save_to_path = new { type = "string", description = "Optional output file path to save/export log entries as XML" }
                         }
                     }
                 }

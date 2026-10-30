@@ -2720,9 +2720,9 @@ namespace CodesysMcp
             return PlcTraceAndLoggerHelper.InjectCodeLog(pouName, targetPattern, logMessage, level, insertAfter);
         }
 
-        public static DeviceLogResult ReadDeviceLog(string severityFilter = null, string keyword = null, int maxEntries = 50)
+        public static DeviceLogResult ReadDeviceLog(string filePath = null, string severityFilter = null, string keyword = null, string componentFilter = null, int maxEntries = 50, string saveToPath = null)
         {
-            return PlcTraceAndLoggerHelper.ReadDeviceLog(severityFilter, keyword, maxEntries);
+            return PlcTraceAndLoggerHelper.ReadDeviceLog(filePath, severityFilter, keyword, componentFilter, maxEntries, saveToPath);
         }
     }
 }

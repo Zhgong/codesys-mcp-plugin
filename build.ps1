@@ -138,6 +138,8 @@ if ($common) {
         (Join-Path $framework "System.Core.dll"),
         (Join-Path $framework "System.Web.Extensions.dll"),
         (Join-Path $framework "System.Windows.Forms.dll"),
+        (Join-Path $framework "System.Xml.dll"),
+        (Join-Path $framework "System.Xml.Linq.dll"),
         (Join-Path $framework "Microsoft.CSharp.dll"),
         (Join-Path $common "ScriptEngine3.dll"),
         (Join-Path $common "ComponentModel.dll"),
