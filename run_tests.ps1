@@ -109,6 +109,14 @@ if ($LASTEXITCODE -ne 0) {
     Write-Error "Compiling CodesysMcpTests.exe failed!"
 }
 
+# Copy reference assemblies from lib to bin/Release if present
+$libDir = Join-Path $Root "lib"
+if (Test-Path $libDir) {
+    Get-ChildItem -Path $libDir -Filter *.dll | ForEach-Object {
+        Copy-Item $_.FullName -Destination (Join-Path $Root "bin\Release") -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # Execute C# unit tests
 & $testOut
 $csharpExit = $LASTEXITCODE

@@ -80,6 +80,26 @@ namespace CodesysMcpTests
                 {
                     return Assembly.LoadFrom(path);
                 }
+
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string localPath = Path.Combine(baseDir, asmName);
+                if (File.Exists(localPath))
+                {
+                    return Assembly.LoadFrom(localPath);
+                }
+
+                string repoLib = Path.GetFullPath(Path.Combine(baseDir, @"..\..\lib", asmName));
+                if (File.Exists(repoLib))
+                {
+                    return Assembly.LoadFrom(repoLib);
+                }
+
+                string cwdLib = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "lib", asmName));
+                if (File.Exists(cwdLib))
+                {
+                    return Assembly.LoadFrom(cwdLib);
+                }
+
                 return null;
             };
 

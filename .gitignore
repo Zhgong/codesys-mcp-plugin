@@ -15,3 +15,11 @@ bin/Release/shadow/
 *.user
 *.suo
 .diff_preview/
+
+# Copied reference DLLs during testing
+bin/Release/ComponentModel*.dll
+bin/Release/Core.dll
+bin/Release/EngineWin.dll
+bin/Release/MessageStorage.dll
+bin/Release/ScriptEngine*.dll
+bin/Release/SystemInstances.dll
