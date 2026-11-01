@@ -112,7 +112,10 @@ try {
 
     # 7. Execute push
     Write-Host "`n>>> Pushing $pushBranch to public/$Branch..." -ForegroundColor Cyan
-    git -C $ScriptDir push public "${pushBranch}:${Branch}"
+    $pushArgs = @("push")
+    if ($SkipTests) { $pushArgs += "--no-verify" }
+    $pushArgs += @("public", "${pushBranch}:${Branch}")
+    git -C $ScriptDir @pushArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] git push public failed!" -ForegroundColor Red
         exit 1
