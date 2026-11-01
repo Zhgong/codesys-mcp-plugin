@@ -87,7 +87,7 @@ function Find-Framework {
 Write-Host "`n>>> [Step 2/3] Compiling and running C# Core Unit Tests..." -ForegroundColor Yellow
 $csc = Find-Csc
 $framework = Find-Framework
-$mcpDll = (Resolve-Path (Join-Path $Root "bin\Release\CodesysMcp.dll")).Path
+$mcpDll = [System.IO.Path]::GetFullPath((Join-Path $Root "bin\Release\CodesysMcp.dll"))
 $testOut = Join-Path $Root "bin\Release\CodesysMcpTests.exe"
 
 $refs = @(
