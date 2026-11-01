@@ -637,49 +637,60 @@ namespace CodesysMcp
 
 
         public static object FindObjectByName(string name)
-
         {
-
             var proj = CodesysContext.PrimaryProject;
-
             if (proj == null) return null;
 
-
-
             var treeObj = proj as IScriptTreeObject ?? GetExtension<IScriptTreeObject>(CodesysContext.PrimaryProjectExtended);
-
             if (treeObj == null) return null;
 
+            if (string.IsNullOrEmpty(name)) return null;
 
+            // Support dot notation: e.g. "FB_Test_ForceSensor.Reset"
+            if (name.Contains("."))
+            {
+                var dotIdx = name.LastIndexOf('.');
+                var parentName = name.Substring(0, dotIdx);
+                var childName = name.Substring(dotIdx + 1);
+
+                var parent = FindObjectByName(parentName);
+                if (parent != null)
+                {
+                    var parentTree = parent as IScriptTreeObject ?? GetExtension<IScriptTreeObject>(parent);
+                    if (parentTree != null)
+                    {
+                        var childMatches = parentTree.find(childName, true);
+                        if (childMatches != null && childMatches.Count > 0)
+                        {
+                            foreach (var match in childMatches)
+                            {
+                                var marker = GetExtension<IScriptTextualObjectMarker>(match);
+                                if (marker != null && (marker.has_textual_declaration || marker.has_textual_implementation))
+                                {
+                                    return match;
+                                }
+                            }
+                            return childMatches[0];
+                        }
+                    }
+                }
+            }
 
             var matches = treeObj.find(name, true);
-
             if (matches != null && matches.Count > 0)
-
             {
-
                 foreach (var match in matches)
-
                 {
-
                     var marker = GetExtension<IScriptTextualObjectMarker>(match);
-
                     if (marker != null && (marker.has_textual_declaration || marker.has_textual_implementation))
-
                     {
-
                         return match;
-
                     }
-
                 }
-
                 return matches[0];
-
             }
 
             return null;
-
         }
 
 

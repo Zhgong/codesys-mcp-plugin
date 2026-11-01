@@ -12,6 +12,8 @@ using System.Text;
 
 using System.Threading;
 
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Web.Script.Serialization;
 
 
@@ -122,17 +124,38 @@ namespace CodesysMcp
 
                 {
 
-                    server = new NamedPipeServerStream(
+                    PipeSecurity pipeSecurity = null;
+                    try
+                    {
+                        pipeSecurity = new PipeSecurity();
+                        pipeSecurity.AddAccessRule(new PipeAccessRule(
+                            new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                            PipeAccessRights.ReadWrite,
+                            AccessControlType.Allow));
+                    }
+                    catch { }
 
-                        _pipeName,
-
-                        PipeDirection.InOut,
-
-                        NamedPipeServerStream.MaxAllowedServerInstances,
-
-                        PipeTransmissionMode.Byte,
-
-                        PipeOptions.None);
+                    if (pipeSecurity != null)
+                    {
+                        server = new NamedPipeServerStream(
+                            _pipeName,
+                            PipeDirection.InOut,
+                            NamedPipeServerStream.MaxAllowedServerInstances,
+                            PipeTransmissionMode.Byte,
+                            PipeOptions.None,
+                            4096,
+                            4096,
+                            pipeSecurity);
+                    }
+                    else
+                    {
+                        server = new NamedPipeServerStream(
+                            _pipeName,
+                            PipeDirection.InOut,
+                            NamedPipeServerStream.MaxAllowedServerInstances,
+                            PipeTransmissionMode.Byte,
+                            PipeOptions.None);
+                    }
 
 
 

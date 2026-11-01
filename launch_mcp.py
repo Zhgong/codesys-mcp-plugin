@@ -19,7 +19,7 @@ SCRIPT_PATH = os.path.join(ROOT_DIR, "codesys_mcp_session.py")
 PIPE_PATH = r"\\.\pipe\codesys_mcp_pipe"
 
 headless = "--headless" in sys.argv or "--noUI" in sys.argv
-default_proj = r"C:\Users\vboxuser\Desktop\Repos\agy-codesys\projects\servo_press\ServoPress_VirtualAxis.project"
+default_proj = r"C:\Users\vboxuser\Desktop\Repos\real_project\314_GSAY_Library_SP20_P50_32bit.project"
 if "CODESYS_MCP_PROJECT" not in os.environ and os.path.exists(default_proj):
     os.environ["CODESYS_MCP_PROJECT"] = default_proj
 
