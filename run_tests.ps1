@@ -19,11 +19,75 @@ if (-not $SkipBuild) {
     }
 }
 
+function Find-Csc {
+    if ($env:CSC_PATH -and (Test-Path $env:CSC_PATH)) {
+        return $env:CSC_PATH
+    }
+
+    $cmd = Get-Command csc.exe -ErrorAction SilentlyContinue
+    if ($cmd -and (Test-Path $cmd.Source)) {
+        return $cmd.Source
+    }
+
+    $vswherePaths = @(
+        "vswhere.exe",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\Installer\vswhere.exe"
+    )
+    foreach ($vp in $vswherePaths) {
+        $found = Get-Command $vp -ErrorAction SilentlyContinue
+        $exe = if ($found) { $found.Source } elseif (Test-Path $vp) { $vp } else { $null }
+        if ($exe) {
+            $installPath = & $exe -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+            if (-not $installPath) {
+                $installPath = & $exe -latest -products * -property installationPath
+            }
+            if ($installPath) {
+                $candidates = @(
+                    (Join-Path $installPath "MSBuild\Current\Bin\Roslyn\csc.exe"),
+                    (Join-Path $installPath "MSBuild\Current\Bin\csc.exe")
+                )
+                foreach ($c in $candidates) {
+                    if (Test-Path $c) { return $c }
+                }
+            }
+        }
+    }
+
+    $fallbacks = @(
+        "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\Roslyn\csc.exe",
+        "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\Roslyn\csc.exe",
+        "C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\Roslyn\csc.exe",
+        "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\MSBuild\Current\Bin\Roslyn\csc.exe",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\Roslyn\csc.exe",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\MSBuild\Current\Bin\Roslyn\csc.exe",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\Roslyn\csc.exe",
+        "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
+        "C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+    )
+    foreach ($f in $fallbacks) {
+        if (Test-Path $f) { return $f }
+    }
+
+    throw "Could not locate csc.exe (C# Compiler). Please install Visual Studio or Build Tools."
+}
+
+function Find-Framework {
+    $frameworkPaths = @(
+        "C:\Windows\Microsoft.NET\Framework64\v4.0.30319",
+        "C:\Windows\Microsoft.NET\Framework\v4.0.30319"
+    )
+    foreach ($fp in $frameworkPaths) {
+        if (Test-Path $fp) { return $fp }
+    }
+    throw "Could not locate .NET Framework 4.0/4.8 directory."
+}
+
 # 2. Build C# Tests
 Write-Host "`n>>> [Step 2/3] Compiling and running C# Core Unit Tests..." -ForegroundColor Yellow
-$csc = "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\MSBuild\Current\Bin\Roslyn\csc.exe"
-$framework = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319"
-$mcpDll = (Resolve-Path (Join-Path $Root "bin\Release\CodesysMcp.dll")).Path
+$csc = Find-Csc
+$framework = Find-Framework
+$mcpDll = [System.IO.Path]::GetFullPath((Join-Path $Root "bin\Release\CodesysMcp.dll"))
 $testOut = Join-Path $Root "bin\Release\CodesysMcpTests.exe"
 
 $refs = @(
@@ -31,6 +95,8 @@ $refs = @(
     (Join-Path $framework "System.dll"),
     (Join-Path $framework "System.Core.dll"),
     (Join-Path $framework "System.Web.Extensions.dll"),
+    (Join-Path $framework "System.Xml.dll"),
+    (Join-Path $framework "System.Xml.Linq.dll"),
     (Join-Path $framework "Microsoft.CSharp.dll"),
     $mcpDll
 ) | ForEach-Object { "/reference:`"$_`"" }
@@ -41,6 +107,14 @@ $cscArgs = @("/target:exe", "/optimize+", "/out:`"$testOut`"") + $refs + $srcFil
 & $csc $cscArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Compiling CodesysMcpTests.exe failed!"
+}
+
+# Copy reference assemblies from lib to bin/Release if present
+$libDir = Join-Path $Root "lib"
+if (Test-Path $libDir) {
+    Get-ChildItem -Path $libDir -Filter *.dll | ForEach-Object {
+        Copy-Item $_.FullName -Destination (Join-Path $Root "bin\Release") -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # Execute C# unit tests

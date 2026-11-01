@@ -9,10 +9,15 @@ namespace CodesysMcp
 
         public static void Start(object projects, object system, string pipeName = McpServer.DefaultPipeName)
         {
+            Start(projects, system, null, pipeName);
+        }
+
+        public static void Start(object projects, object system, object online, string pipeName = McpServer.DefaultPipeName)
+        {
             try
             {
-                Console.WriteLine("[CodesysMcp] Initializing context with projects and system...");
-                CodesysContext.Initialize(projects, system);
+                Console.WriteLine("[CodesysMcp] Initializing context with projects, system, and online...");
+                CodesysContext.Initialize(projects, system, online);
 
                 if (_server != null)
                 {
@@ -22,6 +27,12 @@ namespace CodesysMcp
                 _server = new McpServer(pipeName ?? McpServer.DefaultPipeName);
                 _server.Start();
                 Console.WriteLine($"[CodesysMcp] Stdio MCP Named Pipe server ready on: {pipeName ?? McpServer.DefaultPipeName}");
+
+                try
+                {
+                    CodesysIdeUiHelper.InstallStatusIndicator(pipeName ?? McpServer.DefaultPipeName);
+                }
+                catch { }
             }
             catch (Exception ex)
             {
@@ -32,6 +43,12 @@ namespace CodesysMcp
 
         public static void Stop()
         {
+            try
+            {
+                CodesysIdeUiHelper.RemoveStatusIndicator();
+            }
+            catch { }
+
             if (_server != null)
             {
                 _server.Stop();

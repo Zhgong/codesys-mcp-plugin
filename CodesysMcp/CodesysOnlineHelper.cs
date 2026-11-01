@@ -1,0 +1,1150 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using System.Text.RegularExpressions;
+
+namespace CodesysMcp
+{
+    public class OnlineStatusResult
+    {
+        public bool isLoggedIn { get; set; }
+        public string applicationState { get; set; } = "Unknown";
+        public string operationState { get; set; } = "Unknown";
+        public bool isException { get; set; } = false;
+        public string exceptionDetails { get; set; }
+        public List<string> decodedOperationFlags { get; set; } = new List<string>();
+        public string activeApplication { get; set; }
+        public List<string> forcedExpressions { get; set; } = new List<string>();
+        public string message { get; set; }
+    }
+
+    public class ReadVariablesResult
+    {
+        public bool success { get; set; }
+        public Dictionary<string, string> values { get; set; } = new Dictionary<string, string>();
+        public string message { get; set; }
+    }
+
+    public class WriteVariableResult
+    {
+        public bool success { get; set; }
+        public string name { get; set; }
+        public string value { get; set; }
+        public string actualValue { get; set; }
+        public bool verified { get; set; }
+        public bool isForced { get; set; }
+        public string message { get; set; }
+    }
+
+    public class BatchWriteItemResult
+    {
+        public string target { get; set; }
+        public string actual { get; set; }
+        public bool verified { get; set; }
+        public string error { get; set; }
+    }
+
+    public class BatchWriteResult
+    {
+        public bool success { get; set; }
+        public int totalCount { get; set; }
+        public int succeededCount { get; set; }
+        public int failedCount { get; set; }
+        public bool allVerified { get; set; }
+        public Dictionary<string, BatchWriteItemResult> details { get; set; } = new Dictionary<string, BatchWriteItemResult>();
+        public string message { get; set; }
+    }
+
+    public class ReadArrayResult
+    {
+        public bool success { get; set; }
+        public string variable { get; set; }
+        public int startIndex { get; set; }
+        public int count { get; set; }
+        public List<string> items { get; set; } = new List<string>();
+        public string message { get; set; }
+    }
+
+    public class ReadStructResult
+    {
+        public bool success { get; set; }
+        public string variable { get; set; }
+        public string typeName { get; set; }
+        public Dictionary<string, object> values { get; set; } = new Dictionary<string, object>();
+        public string rawText { get; set; }
+        public string message { get; set; }
+    }
+
+    public static class CodesysOnlineHelper
+    {
+        private static object _cachedOnlineApp;
+        public static object GetCachedOnlineApp() => _cachedOnlineApp;
+
+        public static string NormalizeIecValue(string raw)
+        {
+            if (raw == null) return string.Empty;
+            string s = raw.Trim();
+            int hashIdx = s.IndexOf('#');
+            if (hashIdx >= 0)
+            {
+                s = s.Substring(hashIdx + 1).Trim();
+            }
+            return s;
+        }
+
+        public static bool ValuesMatch(string actual, string target)
+        {
+            string normActual = NormalizeIecValue(actual);
+            string normTarget = NormalizeIecValue(target);
+
+            if (string.Equals(normActual, normTarget, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (double.TryParse(normActual, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d1) &&
+                double.TryParse(normTarget, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2))
+            {
+                return Math.Abs(d1 - d2) < 0.001;
+            }
+
+            if (bool.TryParse(normActual, out var b1) && bool.TryParse(normTarget, out var b2))
+            {
+                return b1 == b2;
+            }
+
+            return false;
+        }
+
+        public static void ClearSession()
+        {
+            try
+            {
+                if (_cachedOnlineApp != null)
+                {
+                    var logoutMethod = _cachedOnlineApp.GetType().GetMethod("logout");
+                    logoutMethod?.Invoke(_cachedOnlineApp, null);
+
+                    var disp = _cachedOnlineApp as IDisposable;
+                    disp?.Dispose();
+                }
+            }
+            catch { }
+            finally
+            {
+                _cachedOnlineApp = null;
+            }
+        }
+
+        private static object GetMemberValue(object target, string name)
+        {
+            if (target == null) return null;
+            var type = target.GetType();
+            var prop = type.GetProperty(name);
+            if (prop != null)
+            {
+                try { return prop.GetValue(target, null); } catch { }
+            }
+            var method = type.GetMethod(name, Type.EmptyTypes);
+            if (method != null)
+            {
+                try { return method.Invoke(target, null); } catch { }
+            }
+            return null;
+        }
+
+        public static string EnsureExecutionStack()
+        {
+            if (CodesysContext.Online == null) return "Online object is null";
+            try
+            {
+                var onlineType = CodesysContext.Online.GetType();
+                var stackField = onlineType.GetField("_executionStack", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (stackField == null) return "No _executionStack field on " + onlineType.FullName;
+
+                var stackObj = stackField.GetValue(CodesysContext.Online);
+                if (stackObj == null) return "_executionStack value is null";
+
+                var countProp = stackObj.GetType().GetProperty("Count");
+                int count = countProp != null ? Convert.ToInt32(countProp.GetValue(stackObj, null)) : -1;
+                if (count > 0)
+                {
+                    try
+                    {
+                        var peekMethod = stackObj.GetType().GetMethod("Peek");
+                        var currentTop = peekMethod?.Invoke(stackObj, null);
+                        if (currentTop != null)
+                        {
+                            AppDomain.CurrentDomain.SetData("CodesysMcp_ExecArgs", currentTop);
+                        }
+                    }
+                    catch { }
+                    return $"_executionStack Count={count}";
+                }
+
+                if (count == 0)
+                {
+                    var pushMethod = stackObj.GetType().GetMethod("Push");
+                    if (pushMethod != null)
+                    {
+                        var argType = pushMethod.GetParameters()[0].ParameterType;
+                        object dummyArgs = AppDomain.CurrentDomain.GetData("CodesysMcp_ExecArgs");
+
+                        if (dummyArgs == null)
+                        {
+                            // Find concrete subclass of ScriptExecutionEventArgs in loaded assemblies
+                            Type concreteType = null;
+                            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                            {
+                                try
+                                {
+                                    foreach (var t in asm.GetTypes())
+                                    {
+                                        if (!t.IsAbstract && !t.IsInterface && argType.IsAssignableFrom(t))
+                                        {
+                                            concreteType = t;
+                                            break;
+                                        }
+                                    }
+                                    if (concreteType != null) break;
+                                }
+                                catch { }
+                            }
+
+                            if (concreteType != null)
+                            {
+                                try
+                                {
+                                    dummyArgs = Activator.CreateInstance(concreteType, true);
+                                }
+                                catch
+                                {
+                                    dummyArgs = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(concreteType);
+                                }
+                            }
+                        }
+
+                        if (dummyArgs != null)
+                        {
+                            AppDomain.CurrentDomain.SetData("CodesysMcp_ExecArgs", dummyArgs);
+                            pushMethod.Invoke(stackObj, new object[] { dummyArgs });
+                            return $"Pushed {dummyArgs.GetType().FullName} onto _executionStack (Count=1)";
+                        }
+                        return $"Could not find concrete type for {argType.FullName}";
+                    }
+                }
+                return $"_executionStack Count={count}";
+            }
+            catch (Exception ex)
+            {
+                return "EnsureExecutionStack error: " + (ex.InnerException?.Message ?? ex.Message);
+            }
+        }
+
+        private static object GetOrCreateOnlineApp(string appName = null)
+        {
+            EnsureExecutionStack();
+
+            if (_cachedOnlineApp != null)
+            {
+                try
+                {
+                    var isLoggedVal = GetMemberValue(_cachedOnlineApp, "is_logged_in");
+                    bool loggedIn = isLoggedVal != null && Convert.ToBoolean(isLoggedVal);
+                    if (loggedIn)
+                    {
+                        return _cachedOnlineApp;
+                    }
+                }
+                catch
+                {
+                    _cachedOnlineApp = null;
+                }
+                _cachedOnlineApp = null;
+            }
+
+            if (CodesysContext.Online == null)
+            {
+                throw new InvalidOperationException("CODESYS Online engine is not available. Please ensure online module is passed during session startup.");
+            }
+
+            var proj = CodesysContext.PrimaryProject;
+            if (proj == null)
+            {
+                throw new InvalidOperationException("No active CODESYS project is currently open.");
+            }
+
+            object appTarget = null;
+            if (!string.IsNullOrEmpty(appName))
+            {
+                appTarget = CodesysOperations.FindObjectByName(appName);
+                if (appTarget == null)
+                {
+                    throw new FileNotFoundException($"Application object '{appName}' not found in active project.");
+                }
+            }
+            else
+            {
+                try
+                {
+                    var activeAppProp = proj.GetType().GetProperty("active_application");
+                    appTarget = activeAppProp?.GetValue(proj, null);
+                }
+                catch { }
+            }
+
+            MethodInfo createZeroArg = null;
+            MethodInfo createOneArg = null;
+            foreach (var m in CodesysContext.Online.GetType().GetMethods())
+            {
+                if (m.Name == "create_online_application")
+                {
+                    int len = m.GetParameters().Length;
+                    if (len == 0) createZeroArg = m;
+                    else if (len == 1) createOneArg = m;
+                }
+            }
+
+            try
+            {
+                if (appTarget != null && createOneArg != null)
+                {
+                    _cachedOnlineApp = createOneArg.Invoke(CodesysContext.Online, new object[] { appTarget });
+                }
+                else if (createZeroArg != null)
+                {
+                    _cachedOnlineApp = createZeroArg.Invoke(CodesysContext.Online, new object[0]);
+                }
+                else if (createOneArg != null)
+                {
+                    _cachedOnlineApp = createOneArg.Invoke(CodesysContext.Online, new object[] { appTarget });
+                }
+                else
+                {
+                    throw new InvalidOperationException("Method 'create_online_application' not found on CODESYS online object.");
+                }
+            }
+            catch (TargetInvocationException ex)
+            {
+                throw ex.InnerException ?? ex;
+            }
+            return _cachedOnlineApp;
+        }
+
+        public static OnlineStatusResult GetOnlineStatus()
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var res = new OnlineStatusResult();
+                if (_cachedOnlineApp == null)
+                {
+                    res.isLoggedIn = false;
+                    res.applicationState = "Offline";
+                    res.message = "Not logged in to any PLC or SoftPLC instance.";
+                    return res;
+                }
+
+                try
+                {
+                    var isLoggedVal = GetMemberValue(_cachedOnlineApp, "is_logged_in");
+                    res.isLoggedIn = isLoggedVal != null && Convert.ToBoolean(isLoggedVal);
+
+                    var appStateVal = GetMemberValue(_cachedOnlineApp, "application_state");
+                    res.applicationState = appStateVal?.ToString() ?? "Unknown";
+
+                    var opStateVal = GetMemberValue(_cachedOnlineApp, "operation_state");
+                    res.operationState = opStateVal?.ToString() ?? "Unknown";
+
+                    // Decode operationState bitmask and detect IEC runtime exceptions (bit 0x0020 = 32)
+                    if (int.TryParse(res.operationState, out int opCode))
+                    {
+                        if ((opCode & 0x0001) != 0) res.decodedOperationFlags.Add("ProgramLoaded");
+                        if ((opCode & 0x0002) != 0) res.decodedOperationFlags.Add("DebugActive");
+                        if ((opCode & 0x0004) != 0) res.decodedOperationFlags.Add("ForceActive");
+                        if ((opCode & 0x0008) != 0) res.decodedOperationFlags.Add("FlowActive");
+                        if ((opCode & 0x0010) != 0) res.decodedOperationFlags.Add("BreakpointHit");
+                        if ((opCode & 0x0020) != 0)
+                        {
+                            res.decodedOperationFlags.Add("Exception");
+                            res.isException = true;
+                        }
+                        if ((opCode & 0x1000) != 0) res.decodedOperationFlags.Add("OnlineConnected");
+                    }
+                    if (res.applicationState.IndexOf("exception", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        res.isException = true;
+                    }
+
+                    if (res.isException)
+                    {
+                        res.exceptionDetails = $"CRITICAL: CODESYS PLC Runtime Exception detected! (State: {res.applicationState}, Operation: {res.operationState} [{string.Join("|", res.decodedOperationFlags)}]). Program execution is halted.";
+                    }
+
+                    var forcedProp = _cachedOnlineApp.GetType().GetMethod("get_forced_expressions");
+                    if (forcedProp != null)
+                    {
+                        var forcedList = forcedProp.Invoke(_cachedOnlineApp, null) as IEnumerable;
+                        if (forcedList != null)
+                        {
+                            foreach (var item in forcedList)
+                            {
+                                if (item != null) res.forcedExpressions.Add(item.ToString());
+                            }
+                        }
+                    }
+
+                    if (res.isException)
+                    {
+                        res.message = res.exceptionDetails;
+                    }
+                    else
+                    {
+                        res.message = res.isLoggedIn
+                            ? $"Connected to PLC (State: {res.applicationState}, Operation: {res.operationState} [{string.Join("|", res.decodedOperationFlags)}])."
+                            : "Online application session is disconnected.";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    res.isLoggedIn = false;
+                    res.message = "Failed to query PLC state: " + ex.Message;
+                }
+
+                return res;
+            });
+        }
+
+        public static OnlineStatusResult PlcLogin(string mode = "try_online_change", bool deleteForeignApps = true, string appName = null, string username = null, string password = null)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                string user = !string.IsNullOrEmpty(username) ? username : Environment.GetEnvironmentVariable("CODESYS_DEVICE_USER");
+                string pass = password ?? Environment.GetEnvironmentVariable("CODESYS_DEVICE_PASSWORD");
+                if (!string.IsNullOrEmpty(user) && CodesysContext.Online != null)
+                {
+                    try
+                    {
+                        var setCredMethod = CodesysContext.Online.GetType().GetMethod("set_default_credentials", new Type[] { typeof(string), typeof(string) });
+                        if (setCredMethod != null)
+                        {
+                            setCredMethod.Invoke(CodesysContext.Online, new object[] { user, pass ?? string.Empty });
+                            CodesysContext.LogToIde($"[INFO] plc_login: Applied device credentials for user '{user}' via online.set_default_credentials.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        CodesysContext.LogToIde($"[WARNING] plc_login: set_default_credentials failed: {ex.Message}");
+                    }
+                }
+
+
+                var onlineApp = GetOrCreateOnlineApp(appName);
+                var loginMethod = onlineApp.GetType().GetMethod("login");
+                if (loginMethod == null)
+                {
+                    throw new InvalidOperationException("Method 'login' not found on online application.");
+                }
+
+                var param0Type = loginMethod.GetParameters()[0].ParameterType;
+
+                // OnlineChangeOption: Never = 0 (Download), Try = 1 (Online Change with Download fallback), Force = 2, Keep = 3
+                int optionVal = 1; // Default to Try
+                string m = (mode ?? "").Trim().ToLowerInvariant();
+                if (m == "download" || m == "never")
+                {
+                    optionVal = 0;
+                }
+                else if (m == "try" || m == "try_online_change")
+                {
+                    optionVal = 1;
+                }
+                else if (m == "force" || m == "force_online_change")
+                {
+                    optionVal = 2;
+                }
+                else if (m == "keep" || m == "login_only")
+                {
+                    optionVal = 3;
+                }
+
+                object changeOptionObj = Enum.ToObject(param0Type, optionVal);
+                object[] loginArgs = new object[] { changeOptionObj, deleteForeignApps };
+
+                try
+                {
+                    CodesysContext.LogToIde($"[STEP] plc_login: Calling login({changeOptionObj}, deleteForeignApps={deleteForeignApps}) on Thread={System.Threading.Thread.CurrentThread.ManagedThreadId} (Apartment={System.Threading.Thread.CurrentThread.GetApartmentState()})...");
+                    loginMethod.Invoke(onlineApp, loginArgs);
+                    CodesysContext.LogToIde($"[STEP] plc_login: loginMethod.Invoke returned! Querying status...");
+                    var status = GetOnlineStatus();
+                    if (status.isLoggedIn)
+                    {
+                        CodesysContext.LogToIde($"[SUCCESS] plc_login: Connected to SoftPLC (State: {status.applicationState}, Operation: {status.operationState})");
+                    }
+                    else
+                    {
+                        CodesysContext.LogToIde($"[WARNING] plc_login: Session login returned false.");
+                    }
+                    return status;
+                }
+                catch (TargetInvocationException ex)
+                {
+                    var inner = ex.InnerException ?? ex;
+                    string fullErr = inner.ToString();
+                    CodesysContext.LogToIde($"[ERROR] plc_login failed: {fullErr}");
+                    throw new Exception(fullErr);
+                }
+                catch (Exception ex)
+                {
+                    string fullErr = ex.ToString();
+                    CodesysContext.LogToIde($"[ERROR] plc_login failed: {fullErr}");
+                    throw new Exception(fullErr);
+                }
+            });
+        }
+
+        public static OnlineStatusResult PlcLogout()
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                ClearSession();
+                CodesysContext.LogToIde("plc_logout: Disconnected and logged out from PLC");
+                return GetOnlineStatus();
+            });
+        }
+
+        public static OnlineStatusResult PlcControl(string action)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var onlineApp = GetOrCreateOnlineApp();
+                if (string.IsNullOrEmpty(action))
+                    throw new ArgumentException("Parameter 'action' is required (e.g. 'start', 'stop', 'reset').");
+
+                string act = action.Trim().ToLowerInvariant();
+                if (act == "start")
+                {
+                    var curState = GetMemberValue(onlineApp, "application_state")?.ToString() ?? "";
+                    if (!string.Equals(curState, "run", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var startMethod = onlineApp.GetType().GetMethod("start");
+                        startMethod?.Invoke(onlineApp, null);
+                    }
+                    CodesysContext.LogToIde("plc_control: Started PLC execution (RUN)");
+                }
+                else if (act == "stop")
+                {
+                    var curState = GetMemberValue(onlineApp, "application_state")?.ToString() ?? "";
+                    if (!string.Equals(curState, "stop", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var stopMethod = onlineApp.GetType().GetMethod("stop");
+                        stopMethod?.Invoke(onlineApp, null);
+                    }
+                    CodesysContext.LogToIde("plc_control: Stopped PLC execution (STOP)");
+                }
+                else if (act == "reset")
+                {
+                    var resetMethod = onlineApp.GetType().GetMethod("reset");
+                    if (resetMethod != null)
+                    {
+                        var p = resetMethod.GetParameters();
+                        if (p.Length == 0)
+                        {
+                            resetMethod.Invoke(onlineApp, null);
+                        }
+                        else if (p.Length == 1)
+                        {
+                            object resetOpt = Enum.ToObject(p[0].ParameterType, 0);
+                            resetMethod.Invoke(onlineApp, new object[] { resetOpt });
+                        }
+                        else if (p.Length == 2)
+                        {
+                            object resetOpt = Enum.ToObject(p[0].ParameterType, 0);
+                            resetMethod.Invoke(onlineApp, new object[] { resetOpt, false });
+                        }
+                    }
+                    CodesysContext.LogToIde("plc_control: Reset PLC application");
+                }
+                else
+                {
+                    throw new NotSupportedException($"Action '{action}' is not supported. Use 'start', 'stop', or 'reset'.");
+                }
+
+                return GetOnlineStatus();
+            });
+        }
+
+        public static ReadVariablesResult ReadVariables(List<string> expressions)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var res = new ReadVariablesResult();
+                if (expressions == null || expressions.Count == 0)
+                {
+                    res.success = true;
+                    res.message = "No expressions provided to read.";
+                    return res;
+                }
+
+                var onlineApp = GetOrCreateOnlineApp();
+                var readValMethod = onlineApp.GetType().GetMethod("read_value", new Type[] { typeof(string) });
+
+                foreach (var expr in expressions)
+                {
+                    if (string.IsNullOrWhiteSpace(expr)) continue;
+                    try
+                    {
+                        var val = readValMethod?.Invoke(onlineApp, new object[] { expr.Trim() })?.ToString();
+                        res.values[expr] = val ?? string.Empty;
+                    }
+                    catch (Exception ex)
+                    {
+                        res.values[expr] = "<Error: " + (ex.InnerException?.Message ?? ex.Message) + ">";
+                    }
+                }
+
+                res.success = true;
+                res.message = $"Successfully read {res.values.Count} variable(s).";
+                return res;
+            });
+        }
+
+        public static WriteVariableResult WriteVariable(string name, string value, bool force = false)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                if (string.IsNullOrEmpty(name))
+                    throw new ArgumentException("Parameter 'name' is required.");
+
+                var onlineApp = GetOrCreateOnlineApp();
+                var setPrep = onlineApp.GetType().GetMethod("set_prepared_value", new Type[] { typeof(string), typeof(string) });
+                if (setPrep == null)
+                    throw new InvalidOperationException("Method 'set_prepared_value' not found.");
+
+                setPrep.Invoke(onlineApp, new object[] { name, value ?? string.Empty });
+
+                if (force)
+                {
+                    var forceMethod = onlineApp.GetType().GetMethod("force_prepared_values");
+                    forceMethod?.Invoke(onlineApp, null);
+                    CodesysContext.LogToIde($"[FORCE] write_variable: Forced '{name}' := '{value}'");
+                }
+                else
+                {
+                    var writeMethod = onlineApp.GetType().GetMethod("write_prepared_values");
+                    writeMethod?.Invoke(onlineApp, null);
+                    CodesysContext.LogToIde($"[WRITE] write_variable: Wrote '{name}' := '{value}'");
+                }
+
+                string actual = null;
+                bool verified = false;
+                try
+                {
+                    var readValMethod = onlineApp.GetType().GetMethod("read_value", new Type[] { typeof(string) });
+                    actual = readValMethod?.Invoke(onlineApp, new object[] { name })?.ToString();
+                    if (actual != null)
+                    {
+                        verified = ValuesMatch(actual, value);
+                    }
+                }
+                catch { }
+
+                return new WriteVariableResult
+                {
+                    success = true,
+                    name = name,
+                    value = value,
+                    actualValue = actual,
+                    verified = verified,
+                    isForced = force,
+                    message = force
+                        ? $"Variable '{name}' was forced to '{value}' (Readback: '{actual}', Verified: {verified})."
+                        : $"Variable '{name}' was written with value '{value}' (Readback: '{actual}', Verified: {verified})."
+                };
+            });
+        }
+
+        public static OnlineStatusResult UnforceVariables(List<string> expressions = null)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var onlineApp = GetOrCreateOnlineApp();
+                if (expressions == null || expressions.Count == 0)
+                {
+                    var unforceAll = onlineApp.GetType().GetMethod("unforce_all_values");
+                    unforceAll?.Invoke(onlineApp, null);
+                    CodesysContext.LogToIde("unforce_variables: Unforced all active forced expressions");
+                }
+                else
+                {
+                    var setUnforce = onlineApp.GetType().GetMethod("set_unforce_value", new Type[] { typeof(string) });
+                    foreach (var expr in expressions)
+                    {
+                        setUnforce?.Invoke(onlineApp, new object[] { expr });
+                    }
+                    var forceMethod = onlineApp.GetType().GetMethod("force_prepared_values");
+                    forceMethod?.Invoke(onlineApp, null);
+                    CodesysContext.LogToIde($"unforce_variables: Unforced {expressions.Count} expression(s)");
+                }
+
+                return GetOnlineStatus();
+            });
+        }
+
+        public static void FlattenObject(string prefix, object obj, Dictionary<string, string> output)
+        {
+            if (obj == null) return;
+
+            if (obj is IDictionary dict)
+            {
+                foreach (DictionaryEntry kv in dict)
+                {
+                    string key = kv.Key?.ToString();
+                    if (string.IsNullOrEmpty(key)) continue;
+                    string fullKey = string.IsNullOrEmpty(prefix) ? key : prefix + "." + key;
+                    FlattenObject(fullKey, kv.Value, output);
+                }
+            }
+            else if (obj is IList list && !(obj is string))
+            {
+                for (int i = 0; i < list.Count; i++)
+                {
+                    string fullKey = $"{prefix}[{i}]";
+                    FlattenObject(fullKey, list[i], output);
+                }
+            }
+            else if (obj is bool b)
+            {
+                output[prefix] = b ? "TRUE" : "FALSE";
+            }
+            else
+            {
+                output[prefix] = obj.ToString();
+            }
+        }
+
+        public static Dictionary<string, object> ParseIecStructString(string raw)
+        {
+            var dict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(raw)) return dict;
+            string s = raw.Trim();
+            if (s.StartsWith("(") && s.EndsWith(")"))
+            {
+                s = s.Substring(1, s.Length - 2).Trim();
+            }
+
+            int depth = 0;
+            int start = 0;
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (s[i] == '(') depth++;
+                else if (s[i] == ')') depth--;
+                else if (s[i] == ',' && depth == 0)
+                {
+                    AddIecField(s.Substring(start, i - start), dict);
+                    start = i + 1;
+                }
+            }
+            if (start < s.Length)
+            {
+                AddIecField(s.Substring(start), dict);
+            }
+            return dict;
+        }
+
+        private static void AddIecField(string fieldStr, Dictionary<string, object> dict)
+        {
+            if (string.IsNullOrWhiteSpace(fieldStr)) return;
+            int assignIdx = fieldStr.IndexOf(":=");
+            if (assignIdx > 0)
+            {
+                string key = fieldStr.Substring(0, assignIdx).Trim();
+                string val = fieldStr.Substring(assignIdx + 2).Trim();
+                dict[key] = NormalizeIecValue(val);
+            }
+        }
+
+        public static List<string> GetDutMembers(string typeOrVarName)
+        {
+            var members = new List<string>();
+            if (string.IsNullOrWhiteSpace(typeOrVarName)) return members;
+
+            try
+            {
+                string targetType = typeOrVarName.Trim();
+                if (targetType.Contains("."))
+                {
+                    string[] parts = targetType.Split('.');
+                    string pouName = parts[0];
+                    string varName = parts[parts.Length - 1];
+
+                    var pou = CodesysOperations.FindObjectByName(pouName);
+                    if (pou != null)
+                    {
+                        var content = CodesysOperations.ReadPou(pouName);
+                        if (!string.IsNullOrEmpty(content.declaration))
+                        {
+                            var varMatch = Regex.Match(content.declaration, $@"(?i)\b{Regex.Escape(varName)}\s*:\s*([a-zA-Z_][a-zA-Z0-9_]*)");
+                            if (varMatch.Success)
+                            {
+                                targetType = varMatch.Groups[1].Value.Trim();
+                            }
+                        }
+                    }
+                }
+
+                var dutObj = CodesysOperations.FindObjectByName(targetType);
+                if (dutObj != null)
+                {
+                    var dutContent = CodesysOperations.ReadPou(targetType);
+                    string decl = dutContent.declaration ?? "";
+                    var structMatch = Regex.Match(decl, @"(?is)\bSTRUCT\b(.*?)\bEND_STRUCT\b");
+                    if (structMatch.Success)
+                    {
+                        string body = structMatch.Groups[1].Value;
+                        var lines = body.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var rawLine in lines)
+                        {
+                            string line = rawLine.Trim();
+                            if (line.StartsWith("//") || line.StartsWith("(*")) continue;
+                            int commentIdx = line.IndexOf("//");
+                            if (commentIdx >= 0) line = line.Substring(0, commentIdx).Trim();
+
+                            var m = Regex.Match(line, @"^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:");
+                            if (m.Success)
+                            {
+                                string memberName = m.Groups[1].Value.Trim();
+                                if (!members.Contains(memberName))
+                                {
+                                    members.Add(memberName);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return members;
+        }
+
+        public static BatchWriteResult BatchWriteVariables(Dictionary<string, string> vars, bool verify = true, bool force = false)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var result = new BatchWriteResult();
+                if (vars == null || vars.Count == 0)
+                {
+                    result.success = true;
+                    result.message = "No variables provided for batch write.";
+                    return result;
+                }
+
+                result.totalCount = vars.Count;
+                var onlineApp = GetOrCreateOnlineApp();
+                var setPrep = onlineApp.GetType().GetMethod("set_prepared_value", new Type[] { typeof(string), typeof(string) });
+                if (setPrep == null)
+                    throw new InvalidOperationException("Method 'set_prepared_value' not found on online application.");
+
+                // Phase 1: Set prepared values in memory for single-cycle atomic write
+                foreach (var kvp in vars)
+                {
+                    var itemRes = new BatchWriteItemResult { target = kvp.Value };
+                    result.details[kvp.Key] = itemRes;
+                    try
+                    {
+                        setPrep.Invoke(onlineApp, new object[] { kvp.Key, kvp.Value ?? string.Empty });
+                    }
+                    catch (Exception ex)
+                    {
+                        itemRes.error = ex.InnerException?.Message ?? ex.Message;
+                        result.failedCount++;
+                    }
+                }
+
+                // Phase 2: Atomic commit to PLC cycle
+                try
+                {
+                    if (force)
+                    {
+                        var forceMethod = onlineApp.GetType().GetMethod("force_prepared_values");
+                        forceMethod?.Invoke(onlineApp, null);
+                        CodesysContext.LogToIde($"[FORCE] batch_write_variables: Forced {vars.Count} prepared values.");
+                    }
+                    else
+                    {
+                        var writeMethod = onlineApp.GetType().GetMethod("write_prepared_values");
+                        writeMethod?.Invoke(onlineApp, null);
+                        CodesysContext.LogToIde($"[WRITE] batch_write_variables: Wrote {vars.Count} prepared values atomically.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.success = false;
+                    result.message = "Failed to commit prepared values: " + (ex.InnerException?.Message ?? ex.Message);
+                    return result;
+                }
+
+                // Phase 3: Verification (if requested)
+                bool allMatch = true;
+                var readValMethod = onlineApp.GetType().GetMethod("read_value", new Type[] { typeof(string) });
+                if (verify && readValMethod != null && vars.Count > 0)
+                {
+                    // Allow PLC task cycle (typically 20-50ms) to commit and gateway monitoring cache to refresh
+                    System.Threading.Thread.Sleep(100);
+                }
+
+                foreach (var kvp in vars)
+                {
+                    var item = result.details[kvp.Key];
+                    if (item.error != null)
+                    {
+                        allMatch = false;
+                        continue;
+                    }
+
+                    if (verify && readValMethod != null)
+                    {
+                        try
+                        {
+                            var actual = readValMethod.Invoke(onlineApp, new object[] { kvp.Key })?.ToString();
+                            item.actual = actual;
+                            item.verified = ValuesMatch(actual, kvp.Value);
+                            
+                            // Retry up to 3 times (60ms each) to allow asynchronous gateway monitoring sync
+                            int attempts = 0;
+                            while (!item.verified && attempts < 3)
+                            {
+                                System.Threading.Thread.Sleep(60);
+                                actual = readValMethod.Invoke(onlineApp, new object[] { kvp.Key })?.ToString();
+                                item.actual = actual;
+                                item.verified = ValuesMatch(actual, kvp.Value);
+                                attempts++;
+                            }
+
+                            if (item.verified)
+                            {
+                                result.succeededCount++;
+                            }
+                            else
+                            {
+                                result.failedCount++;
+                                allMatch = false;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            item.error = "Readback failed: " + (ex.InnerException?.Message ?? ex.Message);
+                            result.failedCount++;
+                            allMatch = false;
+                        }
+                    }
+                    else
+                    {
+                        item.verified = true;
+                        result.succeededCount++;
+                    }
+                }
+
+                result.allVerified = allMatch;
+                result.success = (result.failedCount == 0);
+                result.message = $"Batch write complete: {result.succeededCount}/{result.totalCount} succeeded, {result.failedCount} failed.";
+                return result;
+            });
+        }
+
+        public static BatchWriteResult WriteStruct(string structName, object values, bool verify = true, bool force = false)
+        {
+            if (string.IsNullOrEmpty(structName))
+                throw new ArgumentException("Parameter 'structName' is required.");
+
+            var flatMap = new Dictionary<string, string>();
+            FlattenObject(structName, values, flatMap);
+
+            if (flatMap.Count == 0)
+            {
+                return new BatchWriteResult
+                {
+                    success = true,
+                    message = $"No member variables extracted from '{structName}'."
+                };
+            }
+
+            return BatchWriteVariables(flatMap, verify, force);
+        }
+
+        public static ReadArrayResult ReadArray(string arrayName, int startIndex, int count)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var result = new ReadArrayResult
+                {
+                    variable = arrayName,
+                    startIndex = startIndex,
+                    count = count
+                };
+
+                if (string.IsNullOrEmpty(arrayName))
+                {
+                    result.success = false;
+                    result.message = "Parameter 'arrayName' is required.";
+                    return result;
+                }
+
+                if (count <= 0)
+                {
+                    result.success = true;
+                    result.message = "Count is 0 or negative, returning empty array.";
+                    return result;
+                }
+
+                if (count > 1000)
+                {
+                    count = 1000;
+                    result.count = count;
+                }
+
+                var expressions = new List<string>(count);
+                for (int i = 0; i < count; i++)
+                {
+                    expressions.Add($"{arrayName}[{startIndex + i}]");
+                }
+
+                var readResult = ReadVariables(expressions);
+                result.success = readResult.success;
+                result.items = new List<string>(count);
+
+                for (int i = 0; i < count; i++)
+                {
+                    string expr = expressions[i];
+                    string val = null;
+                    if (readResult.values != null && readResult.values.TryGetValue(expr, out val))
+                    {
+                        result.items.Add(NormalizeIecValue(val));
+                    }
+                    else
+                    {
+                        result.items.Add(string.Empty);
+                    }
+                }
+
+                result.message = $"Successfully read {result.items.Count} array element(s) from '{arrayName}'.";
+                return result;
+            });
+        }
+
+        public static ReadStructResult ReadStruct(string structName, List<string> memberNames = null)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var result = new ReadStructResult
+                {
+                    variable = structName
+                };
+
+                if (string.IsNullOrEmpty(structName))
+                {
+                    result.success = false;
+                    result.message = "Parameter 'structName' is required.";
+                    return result;
+                }
+
+                var onlineApp = GetOrCreateOnlineApp();
+                var readValMethod = onlineApp.GetType().GetMethod("read_value", new Type[] { typeof(string) });
+                if (readValMethod == null)
+                    throw new InvalidOperationException("Method 'read_value' not found on online application.");
+
+                // 1. First attempt: Direct read_value on structName
+                try
+                {
+                    var rawVal = readValMethod.Invoke(onlineApp, new object[] { structName })?.ToString();
+                    result.rawText = rawVal;
+                    if (!string.IsNullOrEmpty(rawVal) && rawVal.Trim().StartsWith("(") && rawVal.Trim().EndsWith(")"))
+                    {
+                        var parsed = ParseIecStructString(rawVal);
+                        if (parsed.Count > 0)
+                        {
+                            result.values = parsed;
+                            result.success = true;
+                            result.message = $"Successfully read struct '{structName}' with {parsed.Count} field(s) via direct tuple.";
+                            return result;
+                        }
+                    }
+                }
+                catch { }
+
+                // 2. Second attempt: Auto-discover members if not provided
+                if (memberNames == null || memberNames.Count == 0)
+                {
+                    memberNames = GetDutMembers(structName);
+                }
+
+                if (memberNames != null && memberNames.Count > 0)
+                {
+                    var exprs = new List<string>();
+                    foreach (var m in memberNames)
+                    {
+                        exprs.Add($"{structName}.{m}");
+                    }
+
+                    var readRes = ReadVariables(exprs);
+                    foreach (var m in memberNames)
+                    {
+                        string expr = $"{structName}.{m}";
+                        string val = null;
+                        if (readRes.values != null && readRes.values.TryGetValue(expr, out val))
+                        {
+                            result.values[m] = NormalizeIecValue(val);
+                        }
+                    }
+
+                    result.success = true;
+                    result.message = $"Successfully read struct '{structName}' with {result.values.Count} member(s).";
+                    return result;
+                }
+
+                result.success = false;
+                result.message = $"Could not determine members for struct '{structName}'. Please provide memberNames or ensure DUT exists in project.";
+                return result;
+            });
+        }
+
+        public static string CreateBootApplication(string appName = null)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var proj = CodesysContext.PrimaryProject;
+                if (proj == null) throw new InvalidOperationException("No active project open.");
+
+                _3S.CoDeSys.ScriptEngine.BasicFunctionality.IScriptApplication app = null;
+                if (!string.IsNullOrEmpty(appName))
+                {
+                    var ext = CodesysOperations.FindObjectByName(appName);
+                    if (ext != null)
+                    {
+                        app = CodesysOperations.GetExtension<_3S.CoDeSys.ScriptEngine.BasicFunctionality.IScriptApplication>(ext);
+                    }
+                }
+
+                if (app == null)
+                {
+                    try
+                    {
+                        var prop = proj.GetType().GetProperty("active_application");
+                        var activeAppExt = prop?.GetValue(proj, null);
+                        if (activeAppExt != null)
+                        {
+                            app = CodesysOperations.GetExtension<_3S.CoDeSys.ScriptEngine.BasicFunctionality.IScriptApplication>(activeAppExt);
+                        }
+                    }
+                    catch { }
+                }
+
+                if (app == null) throw new InvalidOperationException("Could not resolve active application to create boot project.");
+
+                app.create_boot_application(null);
+                CodesysContext.LogToIde("create_boot_application: Successfully created boot project for application");
+                return "Boot application created successfully.";
+            });
+        }
+    }
+}

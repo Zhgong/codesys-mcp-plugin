@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 
 namespace CodesysMcpTests
@@ -11,6 +12,14 @@ namespace CodesysMcpTests
             if (!EqualityComparer<T>.Default.Equals(expected, actual))
             {
                 throw new Exception($"Assert.AreEqual failed. Expected: <{expected}>, Actual: <{actual}>. {message}");
+            }
+        }
+
+        public static void AreEqual(double expected, double actual, double delta, string message = "")
+        {
+            if (Math.Abs(expected - actual) > delta)
+            {
+                throw new Exception($"Assert.AreEqual failed. Expected: <{expected}> (+/- {delta}), Actual: <{actual}>. {message}");
             }
         }
 
@@ -62,6 +71,38 @@ namespace CodesysMcpTests
     {
         static int Main(string[] args)
         {
+            AppDomain.CurrentDomain.AssemblyResolve += (sender, resolveArgs) =>
+            {
+                string asmName = new AssemblyName(resolveArgs.Name).Name + ".dll";
+                string codesysCommon = @"C:\Program Files\CODESYS 3.5.20.50\CODESYS\Common";
+                string path = Path.Combine(codesysCommon, asmName);
+                if (File.Exists(path))
+                {
+                    return Assembly.LoadFrom(path);
+                }
+
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string localPath = Path.Combine(baseDir, asmName);
+                if (File.Exists(localPath))
+                {
+                    return Assembly.LoadFrom(localPath);
+                }
+
+                string repoLib = Path.GetFullPath(Path.Combine(baseDir, @"..\..\lib", asmName));
+                if (File.Exists(repoLib))
+                {
+                    return Assembly.LoadFrom(repoLib);
+                }
+
+                string cwdLib = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "lib", asmName));
+                if (File.Exists(cwdLib))
+                {
+                    return Assembly.LoadFrom(cwdLib);
+                }
+
+                return null;
+            };
+
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("==========================================================");
             Console.WriteLine(" Running CodesysMcp C# Core Unit Tests");
@@ -72,7 +113,15 @@ namespace CodesysMcpTests
             {
                 typeof(ProtocolTests),
                 typeof(ToolValidationTests),
-                typeof(StreamFramingTests)
+                typeof(StreamFramingTests),
+                typeof(SearchEngineTests),
+                typeof(DiffEngineTests),
+                typeof(DiffViewerTests),
+                typeof(OnlineTests),
+                typeof(BatchRecipeTests),
+                typeof(IdeUiIndicatorTests),
+                typeof(TraceAndLoggerTests),
+                typeof(DeviceLoggerTests)
             };
 
             int passed = 0;

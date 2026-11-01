@@ -9,6 +9,17 @@ CodesysMcp/obj/
 CodesysMcpCli/bin/
 CodesysMcpCli/obj/
 *Tests.exe
+bin/Release/*_*CodesysMcp.dll
+bin/Release/shadow/
 .vs/
 *.user
 *.suo
+.diff_preview/
+
+# Copied reference DLLs during testing
+bin/Release/ComponentModel*.dll
+bin/Release/Core.dll
+bin/Release/EngineWin.dll
+bin/Release/MessageStorage.dll
+bin/Release/ScriptEngine*.dll
+bin/Release/SystemInstances.dll

@@ -1,0 +1,28 @@
+#!/bin/sh
+# Git pre-push hook: Enforce security & quality gatekeeper before pushing to public repo
+
+remote="$1"
+url="$2"
+
+# Only enforce when pushing to the public repository
+if [ "$remote" = "public" ] || echo "$url" | grep -q "Zhgong/codesys-mcp-plugin.git"; then
+    echo "=========================================================="
+    echo " [GIT HOOK] Intercepting push to PUBLIC repository..."
+    echo " Remote: $remote ($url)"
+    echo " Running Public Gatekeeper checks..."
+    echo "=========================================================="
+
+    repo_dir="$(git rev-parse --show-toplevel)"
+
+    powershell.exe -ExecutionPolicy Bypass -File "$repo_dir/check_public_gate.ps1" -Remote "$remote"
+    gate_exit=$?
+
+    if [ $gate_exit -ne 0 ]; then
+        echo ""
+        echo "[SECURITY GATE REJECTION] Direct push to PUBLIC remote blocked by pre-push hook!"
+        echo "Please fix the violations listed above, or use sync_to_public.ps1 for verified releases."
+        exit 1
+    fi
+fi
+
+exit 0
