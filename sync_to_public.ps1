@@ -12,7 +12,9 @@ param (
     [switch]$DryRun = $false,
     [switch]$SkipTests = $false,
     [switch]$IncludeTags = $false,
-    [switch]$FilterIgnored = $false
+    [switch]$FilterIgnored = $false,
+    [switch]$Squash = $false,
+    [string]$SquashMessage = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -27,6 +29,7 @@ Write-Host " [PUBLIC RELEASE SYNC] CODESYS MCP Plugin Release Tool" -ForegroundC
 Write-Host " Source Branch : $Branch" -ForegroundColor Gray
 Write-Host " Target Remote : public (https://github.com/Zhgong/codesys-mcp-plugin.git)" -ForegroundColor Gray
 Write-Host " Filter Mode   : $(if ($FilterIgnored) { 'AUTO-STRIP (.publicignore)' } else { 'STRICT CHECK' })" -ForegroundColor Gray
+Write-Host " Squash Mode   : $(if ($Squash) { 'ENABLED (Single squashed release commit)' } else { 'DISABLED (Preserve commits)' })" -ForegroundColor Gray
 Write-Host " Mode          : $(if ($DryRun) { 'DRY RUN (Preview Only)' } else { 'LIVE SYNC' })" -ForegroundColor Gray
 Write-Host "==========================================================" -ForegroundColor Cyan
 
@@ -38,33 +41,50 @@ if ($status) {
     exit 1
 }
 
-# 2. If FilterIgnored is requested, prepare clean public-release branch
+# 2. If FilterIgnored or Squash is requested, prepare clean public-release branch
 $originalBranch = $Branch
 $pushBranch = $Branch
 
-if ($FilterIgnored) {
-    Write-Host "`n>>> [FILTER MODE] Creating clean public release tree (stripping .publicignore items)..." -ForegroundColor Cyan
+if ($FilterIgnored -or $Squash) {
+    Write-Host "`n>>> [RELEASE PREPARATION] Creating clean public release tree..." -ForegroundColor Cyan
     $releaseBranch = "public-release-$Branch"
-    
-    # Check out release branch from current branch
-    git -C $ScriptDir checkout -B $releaseBranch $Branch 2>$null
+    $hasPublicRef = (git -C $ScriptDir rev-parse --verify --quiet "public/$Branch")
+
+    if ($Squash -and $hasPublicRef) {
+        Write-Host "   - Squashing commits onto public/$Branch base..." -ForegroundColor Cyan
+        git -C $ScriptDir checkout -B $releaseBranch "public/$Branch" 2>$null
+        git -C $ScriptDir merge --squash $Branch 2>$null
+    } else {
+        # Check out release branch from current branch
+        git -C $ScriptDir checkout -B $releaseBranch $Branch 2>$null
+    }
 
     # Load publicignore patterns
-    $publicIgnorePath = Join-Path $ScriptDir ".publicignore"
-    if (Test-Path $publicIgnorePath) {
-        $patterns = Get-Content $publicIgnorePath | Where-Object { $_ -and -not $_.StartsWith("#") }
-        foreach ($pat in $patterns) {
-            $p = $pat.Trim().TrimEnd("/")
-            if (Test-Path (Join-Path $ScriptDir $p)) {
-                git -C $ScriptDir rm -r -f --quiet $p 2>$null
-                Write-Host "   - Stripped: $p" -ForegroundColor Yellow
+    if ($FilterIgnored) {
+        $publicIgnorePath = Join-Path $ScriptDir ".publicignore"
+        if (Test-Path $publicIgnorePath) {
+            $patterns = Get-Content $publicIgnorePath | Where-Object { $_ -and -not $_.StartsWith("#") }
+            foreach ($pat in $patterns) {
+                $p = $pat.Trim().TrimEnd("/")
+                if (Test-Path (Join-Path $ScriptDir $p)) {
+                    git -C $ScriptDir rm -r -f --quiet $p 2>$null
+                    Write-Host "   - Stripped: $p" -ForegroundColor Yellow
+                }
             }
         }
     }
 
     $filterStatus = git -C $ScriptDir status --porcelain
     if ($filterStatus) {
-        git -C $ScriptDir commit -m "chore(release): strip internal wiki and planning docs for public release" --quiet
+        $shortRev = (git -C $ScriptDir rev-parse --short $Branch).Trim()
+        $commitMsg = if ($SquashMessage) {
+            $SquashMessage
+        } elseif ($Squash) {
+            "release: sync squashed updates from $Branch ($shortRev)"
+        } else {
+            "chore(release): strip internal wiki and planning docs for public release"
+        }
+        git -C $ScriptDir commit -m $commitMsg --quiet
         Write-Host "   [DONE] Clean release commit created on $releaseBranch." -ForegroundColor Green
     }
     $pushBranch = $releaseBranch
@@ -130,7 +150,7 @@ try {
     Write-Host "`n[SUCCESS] Successfully synced to the public repository!" -ForegroundColor Green
 }
 finally {
-    if ($FilterIgnored -and (git -C $ScriptDir branch --show-current).Trim() -ne $originalBranch) {
+    if (($FilterIgnored -or $Squash) -and (git -C $ScriptDir branch --show-current).Trim() -ne $originalBranch) {
         git -C $ScriptDir checkout $originalBranch --quiet 2>$null
     }
 }
