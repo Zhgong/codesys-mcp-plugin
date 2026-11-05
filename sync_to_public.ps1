@@ -114,6 +114,7 @@ try {
     Write-Host "`n>>> Pushing $pushBranch to public/$Branch..." -ForegroundColor Cyan
     $pushArgs = @("push")
     if ($SkipTests) { $pushArgs += "--no-verify" }
+    if ($FilterIgnored) { $pushArgs += "--force-with-lease" }
     $pushArgs += @("public", "${pushBranch}:${Branch}")
     git -C $ScriptDir @pushArgs
     if ($LASTEXITCODE -ne 0) {
