@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.Collections.Generic;
 
@@ -1460,7 +1460,9 @@ namespace CodesysMcp
 
 
 
-        private object[] GetToolDefinitions()
+        public static int RegisteredToolCount => GetToolDefinitions().Length;
+
+        public static object[] GetToolDefinitions()
 
         {
 

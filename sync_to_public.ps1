@@ -14,7 +14,8 @@ param (
     [switch]$IncludeTags = $false,
     [switch]$FilterIgnored = $false,
     [switch]$Squash = $false,
-    [string]$SquashMessage = ""
+    [string]$SquashMessage = "",
+    [switch]$Force = $false
 )
 
 $ErrorActionPreference = "Continue"
@@ -123,11 +124,13 @@ try {
     }
 
     # 6. Prompt for explicit confirmation
-    Write-Host ""
-    $confirmation = Read-Host "Are you sure you want to push these commits to the PUBLIC repository? (yes/no)"
-    if ($confirmation -ne "yes" -and $confirmation -ne "y") {
-        Write-Host "[ABORTED] Public sync cancelled by user." -ForegroundColor Yellow
-        return
+    if (-not $Force) {
+        Write-Host ""
+        $confirmation = Read-Host "Are you sure you want to push these commits to the PUBLIC repository? (yes/no)"
+        if ($confirmation -ne "yes" -and $confirmation -ne "y") {
+            Write-Host "[ABORTED] Public sync cancelled by user." -ForegroundColor Yellow
+            return
+        }
     }
 
     # 7. Execute push

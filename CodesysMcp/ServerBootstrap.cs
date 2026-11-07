@@ -7,6 +7,13 @@ namespace CodesysMcp
     {
         private static McpServer _server;
 
+        public static string BuildStartupBanner(string pipeName = null)
+        {
+            string ver = CodesysIdeUiHelper.GetServerVersion();
+            int toolCount = McpServer.RegisteredToolCount;
+            return $"[CODESYS MCP] Native Stdio/Pipe MCP Server v{ver} ready on \\\\.\\pipe\\{pipeName ?? McpServer.DefaultPipeName} ({toolCount} Tools Available)";
+        }
+
         public static void Start(object projects, object system, string pipeName = McpServer.DefaultPipeName)
         {
             Start(projects, system, null, pipeName);
@@ -26,7 +33,9 @@ namespace CodesysMcp
 
                 _server = new McpServer(pipeName ?? McpServer.DefaultPipeName);
                 _server.Start();
-                Console.WriteLine($"[CodesysMcp] Stdio MCP Named Pipe server ready on: {pipeName ?? McpServer.DefaultPipeName}");
+                string banner = BuildStartupBanner(pipeName);
+                Console.WriteLine(banner);
+                CodesysContext.LogToIde(banner);
 
                 try
                 {
