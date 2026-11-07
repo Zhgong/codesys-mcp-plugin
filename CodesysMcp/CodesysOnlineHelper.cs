@@ -10,6 +10,13 @@ using _3S.CoDeSys.ScriptEngine.BasicFunctionality;
 
 namespace CodesysMcp
 {
+    public class DeviceCredentials
+    {
+        public string Username { get; set; }
+        public string Password { get; set; }
+        public string Source { get; set; }
+    }
+
     public class OnlineStatusResult
     {
         public bool isLoggedIn { get; set; }
@@ -417,21 +424,52 @@ namespace CodesysMcp
             });
         }
 
+        public static DeviceCredentials ResolveDeviceCredentials(string username = null, string password = null)
+        {
+            if (!string.IsNullOrEmpty(username))
+            {
+                return new DeviceCredentials
+                {
+                    Username = username,
+                    Password = password ?? string.Empty,
+                    Source = "Explicit"
+                };
+            }
+
+            string envUser = Environment.GetEnvironmentVariable("CODESYS_DEVICE_USER");
+            if (!string.IsNullOrEmpty(envUser))
+            {
+                return new DeviceCredentials
+                {
+                    Username = envUser,
+                    Password = Environment.GetEnvironmentVariable("CODESYS_DEVICE_PASSWORD") ?? string.Empty,
+                    Source = "Environment"
+                };
+            }
+
+            // Default SoftPLC development credentials
+            return new DeviceCredentials
+            {
+                Username = "admin",
+                Password = "1111",
+                Source = "Default"
+            };
+        }
+
         public static OnlineStatusResult PlcLogin(string mode = "try_online_change", bool deleteForeignApps = true, string appName = null, string username = null, string password = null)
         {
             return CodesysContext.RunOnPrimaryThread(() =>
             {
-                string user = !string.IsNullOrEmpty(username) ? username : Environment.GetEnvironmentVariable("CODESYS_DEVICE_USER");
-                string pass = password ?? Environment.GetEnvironmentVariable("CODESYS_DEVICE_PASSWORD");
-                if (!string.IsNullOrEmpty(user) && CodesysContext.Online != null)
+                var creds = ResolveDeviceCredentials(username, password);
+                if (!string.IsNullOrEmpty(creds.Username) && CodesysContext.Online != null)
                 {
                     try
                     {
                         var setCredMethod = CodesysContext.Online.GetType().GetMethod("set_default_credentials", new Type[] { typeof(string), typeof(string) });
                         if (setCredMethod != null)
                         {
-                            setCredMethod.Invoke(CodesysContext.Online, new object[] { user, pass ?? string.Empty });
-                            CodesysContext.LogToIde($"[INFO] plc_login: Applied device credentials for user '{user}' via online.set_default_credentials.");
+                            setCredMethod.Invoke(CodesysContext.Online, new object[] { creds.Username, creds.Password ?? string.Empty });
+                            CodesysContext.LogToIde($"[INFO] plc_login: Applied device credentials for user '{creds.Username}' ({creds.Source}) via online.set_default_credentials.");
                         }
                     }
                     catch (Exception ex)
@@ -475,8 +513,14 @@ namespace CodesysMcp
 
                 try
                 {
-                    CodesysContext.LogToIde($"[STEP] plc_login: Calling login({changeOptionObj}, deleteForeignApps={deleteForeignApps}) on Thread={System.Threading.Thread.CurrentThread.ManagedThreadId} (Apartment={System.Threading.Thread.CurrentThread.GetApartmentState()})...");
-                    loginMethod.Invoke(onlineApp, loginArgs);
+                    int win32ThreadId = DeviceLogonWatchdog.GetCurrentThreadId();
+                    CodesysContext.LogToIde($"[STEP] plc_login: Calling login({changeOptionObj}, deleteForeignApps={deleteForeignApps}) on Thread={System.Threading.Thread.CurrentThread.ManagedThreadId} (Win32={win32ThreadId}, Apartment={System.Threading.Thread.CurrentThread.GetApartmentState()})...");
+
+                    using (new DeviceLogonWatchdog(win32ThreadId, creds.Username, creds.Password))
+                    {
+                        loginMethod.Invoke(onlineApp, loginArgs);
+                    }
+
                     CodesysContext.LogToIde($"[STEP] plc_login: loginMethod.Invoke returned! Querying status...");
                     var status = GetOnlineStatus();
                     if (status.isLoggedIn)
