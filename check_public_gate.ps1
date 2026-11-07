@@ -153,7 +153,7 @@ if (-not $SkipTests -and $rules.requireAllTestsPass) {
     Write-Host "`n>>> [Gate 3/3] Executing automated regression test suite..." -ForegroundColor Cyan
     $testScript = Join-Path $ScriptDir "run_tests.ps1"
     if (Test-Path $testScript) {
-        & powershell -ExecutionPolicy Bypass -File $testScript
+        & powershell -ExecutionPolicy Bypass -File $testScript -SkipBuild
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[FAIL] Test suite failed! Exit code: $LASTEXITCODE" -ForegroundColor Red
             $violations += "Automated test suite failed with exit code $LASTEXITCODE"

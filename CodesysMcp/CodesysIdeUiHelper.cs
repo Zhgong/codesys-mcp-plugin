@@ -33,6 +33,7 @@ namespace CodesysMcp
         public bool isPermanentlyVisible { get; set; }
         public bool hostControlVisible { get; set; }
         public bool hasContextMenu { get; set; }
+        public string version { get; set; }
     }
 
     public static class CodesysIdeUiHelper
@@ -142,7 +143,7 @@ namespace CodesysMcp
                     ss.SendToBack();
 
                     _currentStatus = McpServerStatus.Online;
-                    CodesysContext.LogToIde($"[SUCCESS] CodesysIdeUiHelper: MCP visual status badge installed on persistent strip '{ss.Name}'.");
+                    CodesysContext.LogToIde($"[SUCCESS] CodesysIdeUiHelper: MCP visual status badge (v{GetServerVersion()}) installed on persistent strip '{ss.Name}'.");
                 }
                 catch (Exception ex)
                 {
@@ -256,9 +257,15 @@ namespace CodesysMcp
             _statusBadge.ToolTipText = BuildTooltipText();
         }
 
-        private static string BuildTooltipText()
+        public static string GetServerVersion()
         {
-            return $"CODESYS MCP Server v1.1.0\n" +
+            var ver = typeof(CodesysIdeUiHelper).Assembly.GetName().Version;
+            return ver != null ? ver.ToString(3) : "1.0.0";
+        }
+
+        public static string BuildTooltipText()
+        {
+            return $"CODESYS MCP Server v{GetServerVersion()}\n" +
                    $"Status: {_currentStatus}\n" +
                    $"Pipe: \\\\.\\pipe\\{_currentPipeName}\n" +
                    $"Total Requests: {_requestCounter}\n" +
@@ -316,7 +323,8 @@ namespace CodesysMcp
                 hostControlName = _hostStatusStrip?.Name,
                 isPermanentlyVisible = badgeVisible && hostVisible,
                 hostControlVisible = hostVisible,
-                hasContextMenu = _contextMenu != null && !_contextMenu.IsDisposed
+                hasContextMenu = _contextMenu != null && !_contextMenu.IsDisposed,
+                version = GetServerVersion()
             };
         }
 
@@ -409,6 +417,52 @@ namespace CodesysMcp
             return success;
         }
 
+        public static string ResolveSessionLogPath()
+        {
+            // 1. Explicit environment variable override
+            string envPath = Environment.GetEnvironmentVariable("CODESYS_MCP_LOG_FILE");
+            if (!string.IsNullOrEmpty(envPath))
+            {
+                return envPath;
+            }
+
+            // 2. Standard user home directory: ~/.codesys-mcp-plugin/session_debug.log
+            string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string standardLog = !string.IsNullOrEmpty(userHome)
+                ? Path.Combine(userHome, ".codesys-mcp-plugin", "session_debug.log")
+                : null;
+
+            if (standardLog != null && File.Exists(standardLog))
+            {
+                return standardLog;
+            }
+
+            // 3. Probe upwards from executing assembly location for an existing session_debug.log
+            try
+            {
+                string asmLocation = typeof(CodesysIdeUiHelper).Assembly.Location;
+                if (!string.IsNullOrEmpty(asmLocation))
+                {
+                    string dir = Path.GetDirectoryName(asmLocation);
+                    while (!string.IsNullOrEmpty(dir))
+                    {
+                        string candidate = Path.Combine(dir, "session_debug.log");
+                        if (File.Exists(candidate))
+                        {
+                            return candidate;
+                        }
+                        dir = Path.GetDirectoryName(dir);
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            // 4. Default return standard path (or AppDomain directory fallback)
+            return standardLog ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "session_debug.log");
+        }
+
         public static ContextMenuStrip CreateContextMenu()
         {
             var menu = new ContextMenuStrip();
@@ -459,20 +513,31 @@ namespace CodesysMcp
             {
                 try
                 {
-                    string scriptDir = AppDomain.CurrentDomain.BaseDirectory;
-                    string logFile = Path.Combine(scriptDir, "session_debug.log");
+                    string logFile = ResolveSessionLogPath();
+                    string logDir = Path.GetDirectoryName(logFile);
+                    if (!string.IsNullOrEmpty(logDir) && !Directory.Exists(logDir))
+                    {
+                        try { Directory.CreateDirectory(logDir); } catch { }
+                    }
+
                     if (!File.Exists(logFile))
                     {
-                        string localLog = @"C:\Users\vboxuser\Desktop\Repos\codesys-plugin\session_debug.log";
-                        if (File.Exists(localLog)) logFile = localLog;
+                        try
+                        {
+                            File.WriteAllText(logFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] CODESYS MCP Session Log initialized at: {logFile}\r\n");
+                        }
+                        catch
+                        {
+                        }
                     }
+
                     if (File.Exists(logFile))
                     {
                         System.Diagnostics.Process.Start("notepad.exe", logFile);
                     }
                     else
                     {
-                        MessageBox.Show("Session log file not found at:\n" + logFile, "CODESYS MCP", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        MessageBox.Show("Session log file could not be created or opened at:\n" + logFile, "CODESYS MCP", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
                 }
                 catch (Exception ex)
@@ -502,6 +567,33 @@ namespace CodesysMcp
             return menu;
         }
 
+        public static string BuildDiagnosticsText()
+        {
+            int toolCount = 36;
+            try
+            {
+                toolCount = McpServer.RegisteredToolCount;
+            }
+            catch
+            {
+            }
+
+            return $"==================================================\r\n" +
+                   $" CODESYS MCP Native Server v{GetServerVersion()}\r\n" +
+                   $"==================================================\r\n\r\n" +
+                   $"Server Status       : {_currentStatus}\r\n" +
+                   $"Named Pipe          : \\\\.\\pipe\\{_currentPipeName}\r\n" +
+                   $"Registered Tools    : {toolCount} MCP Tools Available\r\n" +
+                   $"Total Requests      : {_requestCounter}\r\n" +
+                   $"Active Tool         : {_activeTool ?? "None (Idle)"}\r\n" +
+                   $"Last Error          : {_lastError ?? "None"}\r\n\r\n" +
+                   $"Active Project      : {CodesysContext.PrimaryProject?.path ?? "(No project open)"}\r\n" +
+                   $"Online Status       : {(CodesysContext.Online != null ? "Online Engine Active" : "Offline")}\r\n" +
+                   $"Host Control        : {_hostStatusStrip?.Name ?? "None"}\r\n" +
+                   $"Permanently Visible : {(_hostStatusStrip?.Visible == true ? "Yes" : "No")}\r\n" +
+                   $"Timestamp           : {DateTime.Now:yyyy-MM-dd HH:mm:ss}\r\n";
+        }
+
         public static void ShowDiagnosticsDialog()
         {
             var form = new Form
@@ -523,20 +615,7 @@ namespace CodesysMcp
                 Dock = DockStyle.Fill,
                 Font = new Font("Consolas", 9.5f),
                 BackColor = Color.FromArgb(250, 250, 250),
-                Text = $"==================================================\r\n" +
-                       $" CODESYS MCP Native Server v1.1.0\r\n" +
-                       $"==================================================\r\n\r\n" +
-                       $"Server Status       : {_currentStatus}\r\n" +
-                       $"Named Pipe          : \\\\.\\pipe\\{_currentPipeName}\r\n" +
-                       $"Registered Tools    : 30 MCP Tools Available\r\n" +
-                       $"Total Requests      : {_requestCounter}\r\n" +
-                       $"Active Tool         : {_activeTool ?? "None (Idle)"}\r\n" +
-                       $"Last Error          : {_lastError ?? "None"}\r\n\r\n" +
-                       $"Active Project      : {CodesysContext.PrimaryProject?.path ?? "(No project open)"}\r\n" +
-                       $"Online Status       : {(CodesysContext.Online != null ? "Online Engine Active" : "Offline")}\r\n" +
-                       $"Host Control        : {_hostStatusStrip?.Name ?? "None"}\r\n" +
-                       $"Permanently Visible : {(_hostStatusStrip?.Visible == true ? "Yes" : "No")}\r\n" +
-                       $"Timestamp           : {DateTime.Now:yyyy-MM-dd HH:mm:ss}\r\n"
+                Text = BuildDiagnosticsText()
             };
 
             var btnPanel = new Panel { Dock = DockStyle.Bottom, Height = 45, BackColor = Color.FromArgb(240, 240, 240) };

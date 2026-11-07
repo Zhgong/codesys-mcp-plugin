@@ -14,7 +14,20 @@ import warnings
 warnings.filterwarnings("ignore")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_FILE = os.path.join(SCRIPT_DIR, "session_debug.log")
+
+# Standard unified log file: ~/.codesys-mcp-plugin/session_debug.log (or overridden by CODESYS_MCP_LOG_FILE)
+USER_HOME = os.path.expanduser("~")
+DEFAULT_LOG_DIR = os.path.join(USER_HOME, ".codesys-mcp-plugin")
+if not os.path.exists(DEFAULT_LOG_DIR):
+    try:
+        os.makedirs(DEFAULT_LOG_DIR)
+    except:
+        pass
+
+LOG_FILE = os.environ.get("CODESYS_MCP_LOG_FILE")
+if not LOG_FILE:
+    LOG_FILE = os.path.join(DEFAULT_LOG_DIR, "session_debug.log")
+os.environ["CODESYS_MCP_LOG_FILE"] = LOG_FILE
 
 def log(msg):
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -62,16 +75,25 @@ try:
     except NameError:
         pass
 
-    log("Starting C# Stdio/Pipe MCP Server on pipe: %s via direct assembly load..." % pipe_name)
     import System
     import System.Reflection
     asm = System.Reflection.Assembly.LoadFrom(LOAD_PATH)
+    server_version = asm.GetName().Version.ToString(3)
+    tool_count = 36
+    try:
+        mcp_server_type = asm.GetType("CodesysMcp.McpServer")
+        if mcp_server_type:
+            tool_count = int(mcp_server_type.GetProperty("RegisteredToolCount").GetValue(None, None))
+    except:
+        pass
+
+    log("Starting C# Stdio/Pipe MCP Server v%s on pipe: %s via direct assembly load..." % (server_version, pipe_name))
     bootstrap_type = asm.GetType("CodesysMcp.ServerBootstrap")
     param_types = System.Array[System.Type]([System.Object, System.Object, System.Object, System.String])
     start_method = bootstrap_type.GetMethod("Start", param_types)
     param_values = System.Array[System.Object]([projects, system, online_obj, pipe_name])
     start_method.Invoke(None, param_values)
-    log("C# Native Pipe MCP Server is live!")
+    log("C# Native Pipe MCP Server v%s is live!" % server_version)
 
     ui_present = False
     try:
@@ -108,7 +130,7 @@ try:
     try:
         system.write_message(
             Severity.Information,
-            "[CODESYS MCP] Native Stdio/Pipe MCP Server started on \\\\.\\pipe\\%s (GUI Unlocked)" % pipe_name
+            "[CODESYS MCP] Native Stdio/Pipe MCP Server v%s started on \\\\.\\pipe\\%s (GUI Unlocked, %s Tools Available)" % (server_version, pipe_name, tool_count)
         )
     except:
         pass
