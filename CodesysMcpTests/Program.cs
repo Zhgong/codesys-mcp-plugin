@@ -123,7 +123,8 @@ namespace CodesysMcpTests
                 typeof(TraceAndLoggerTests),
                 typeof(DeviceLoggerTests),
                 typeof(CompilerMessagesCategoryTests),
-                typeof(SessionLogSyncTests)
+                typeof(SessionLogSyncTests),
+                typeof(DeviceLogonCredentialTests)
             };
 
             int passed = 0;

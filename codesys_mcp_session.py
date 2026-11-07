@@ -75,6 +75,16 @@ try:
     except NameError:
         pass
 
+    # Proactively configure default device logon credentials to eliminate "Device User Logon" popup
+    dev_user = os.environ.get("CODESYS_DEVICE_USER", "admin")
+    dev_pass = os.environ.get("CODESYS_DEVICE_PASSWORD", "1111")
+    if online_obj:
+        try:
+            online_obj.set_default_credentials(dev_user, dev_pass)
+            log("Applied default SoftPLC device credentials (user='%s') to online engine." % dev_user)
+        except Exception as e:
+            log("Warning: could not set default device credentials: %s" % str(e))
+
     import System
     import System.Reflection
     asm = System.Reflection.Assembly.LoadFrom(LOAD_PATH)
