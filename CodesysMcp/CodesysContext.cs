@@ -1,5 +1,7 @@
 ﻿using System;
+using System.IO;
 using System.Runtime.ExceptionServices;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using _3S.CoDeSys.Core;
@@ -317,9 +319,73 @@ namespace CodesysMcp
 
         private static System.Reflection.MethodInfo _writeMessageMethod;
         private static object _infoSeverityObj;
+        private static readonly object _sessionLogLock = new object();
+        private const long MaxLogSizeBytes = 10 * 1024 * 1024; // 10MB
+
+        public static void WriteToSessionLog(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return;
+            try
+            {
+                string logPath = CodesysIdeUiHelper.ResolveSessionLogPath();
+                if (string.IsNullOrEmpty(logPath)) return;
+
+                string dir = Path.GetDirectoryName(logPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                lock (_sessionLogLock)
+                {
+                    RollOverIfNeeded(logPath);
+
+                    string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                    string prefix = message.StartsWith("[CodesysMcp]") ? "" : "[CodesysMcp] ";
+                    string line = $"[{timestamp}] {prefix}{message}\r\n";
+
+                    using (var stream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+                    using (var writer = new StreamWriter(stream, Encoding.UTF8))
+                    {
+                        writer.Write(line);
+                    }
+                }
+            }
+            catch
+            {
+                // Never let file logging failures affect MCP server operations
+            }
+        }
+
+        private static void RollOverIfNeeded(string logPath)
+        {
+            try
+            {
+                if (File.Exists(logPath))
+                {
+                    var fi = new FileInfo(logPath);
+                    if (fi.Length >= MaxLogSizeBytes)
+                    {
+                        string oldLog = logPath + ".old";
+                        if (File.Exists(oldLog))
+                        {
+                            try { File.Delete(oldLog); } catch { }
+                        }
+                        File.Move(logPath, oldLog);
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
 
         public static void LogToIde(string message, int severity = 8)
         {
+            // 1. Immediately log to unified session debug log (thread-safe, offline/headless safe)
+            WriteToSessionLog(message);
+
+            // 2. Dispatch to CODESYS IDE GUI message window if system is present
             if (!HasSystem) return;
             try
             {

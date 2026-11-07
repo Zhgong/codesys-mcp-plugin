@@ -12,8 +12,8 @@ param (
     [switch]$DryRun = $false,
     [switch]$SkipTests = $false,
     [switch]$IncludeTags = $false,
-    [switch]$FilterIgnored = $false,
-    [switch]$Squash = $false,
+    [switch]$FilterIgnored = $true,
+    [switch]$Squash = $true,
     [string]$SquashMessage = "",
     [switch]$Force = $false
 )
@@ -42,6 +42,10 @@ if ($status) {
     exit 1
 }
 
+# Fetch latest public remote refs so squash base is always strictly up-to-date with public/master
+Write-Host "`n>>> [FETCH] Fetching latest remote refs from public..." -ForegroundColor Cyan
+git -C $ScriptDir fetch public --quiet 2>$null
+
 # 2. If FilterIgnored or Squash is requested, prepare clean public-release branch
 $originalBranch = $Branch
 $pushBranch = $Branch
@@ -51,10 +55,11 @@ if ($FilterIgnored -or $Squash) {
     $releaseBranch = "public-release-$Branch"
     $hasPublicRef = (git -C $ScriptDir rev-parse --verify --quiet "public/$Branch")
 
-    if ($Squash -and $hasPublicRef) {
-        Write-Host "   - Squashing commits onto public/$Branch base..." -ForegroundColor Cyan
-        git -C $ScriptDir checkout -B $releaseBranch "public/$Branch" 2>$null
-        git -C $ScriptDir merge --squash $Branch 2>$null
+    if ($Squash) {
+        $baseRef = if (git -C $ScriptDir rev-parse --verify --quiet "public/master") { "public/master" } else { "public/$Branch" }
+        Write-Host "   - Squashing commits cleanly onto $baseRef base..." -ForegroundColor Cyan
+        git -C $ScriptDir checkout -B $releaseBranch $baseRef 2>$null
+        git -C $ScriptDir checkout $Branch -- . 2>$null
     } else {
         # Check out release branch from current branch
         git -C $ScriptDir checkout -B $releaseBranch $Branch 2>$null
@@ -137,7 +142,7 @@ try {
     Write-Host "`n>>> Pushing $pushBranch to public/$Branch..." -ForegroundColor Cyan
     $pushArgs = @("push")
     if ($SkipTests) { $pushArgs += "--no-verify" }
-    if ($FilterIgnored) { $pushArgs += "--force-with-lease" }
+    if ($FilterIgnored -or $Squash) { $pushArgs += "--force-with-lease" }
     $pushArgs += @("public", "${pushBranch}:${Branch}")
     git -C $ScriptDir @pushArgs
     if ($LASTEXITCODE -ne 0) {

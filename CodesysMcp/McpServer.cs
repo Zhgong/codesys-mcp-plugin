@@ -651,7 +651,25 @@ namespace CodesysMcp
 
                 case "get_compiler_messages":
 
-                    return CodesysOperations.CollectCompilerMessages();
+                    string compCat = "Build";
+
+                    if (args.ContainsKey("category") && args["category"] != null)
+
+                        compCat = args["category"].ToString();
+
+                    string minSev = "Warning";
+
+                    if (args.ContainsKey("min_severity") && args["min_severity"] != null)
+
+                        minSev = args["min_severity"].ToString();
+
+                    return CodesysOperations.CollectCompilerMessages(compCat, minSev);
+
+
+
+                case "get_message_categories":
+
+                    return CodesysOperations.GetMessageCategories();
 
 
 
@@ -718,10 +736,35 @@ namespace CodesysMcp
                     string pViewer = args.ContainsKey("viewer") ? args["viewer"]?.ToString() : "vscode";
 
                     string pOutDir = args.ContainsKey("output_dir") ? args["output_dir"]?.ToString() : null;
-
                     return CodesysOperations.PreviewDiff(pTarget, pViewer, pOutDir);
 
+                case "create_folder":
+                    string fName = args.ContainsKey("name") ? args["name"]?.ToString() : null;
+                    string fParent = args.ContainsKey("parent") ? args["parent"]?.ToString() : null;
+                    var createdFolder = CodesysOperations.CreateFolder(fName, fParent);
+                    return new { success = createdFolder != null, name = fName, parent = fParent };
 
+                case "create_interface":
+                    string itfName = args.ContainsKey("name") ? args["name"]?.ToString() : null;
+                    string itfParent = args.ContainsKey("parent") ? args["parent"]?.ToString() : null;
+                    string itfBase = args.ContainsKey("base_interfaces") ? args["base_interfaces"]?.ToString() : null;
+                    var createdItf = CodesysOperations.CreateInterface(itfName, itfParent, itfBase);
+                    return new { success = createdItf != null, name = itfName };
+
+                case "create_method":
+                    string mParent = args.ContainsKey("parent") ? args["parent"]?.ToString() : null;
+                    string mName = args.ContainsKey("name") ? args["name"]?.ToString() : null;
+                    string mRet = args.ContainsKey("return_type") ? args["return_type"]?.ToString() : null;
+                    string mDecl = args.ContainsKey("declaration") ? args["declaration"]?.ToString() : null;
+                    string mImpl = args.ContainsKey("implementation") ? args["implementation"]?.ToString() : null;
+                    return CodesysOperations.CreateMethod(mParent, mName, mRet, mDecl, mImpl);
+
+                case "create_property":
+                    string propParent = args.ContainsKey("parent") ? args["parent"]?.ToString() : null;
+                    string propName = args.ContainsKey("name") ? args["name"]?.ToString() : null;
+                    string propRet = args.ContainsKey("return_type") ? args["return_type"]?.ToString() : null;
+                    var createdProp = CodesysOperations.CreateProperty(propParent, propName, propRet);
+                    return new { success = createdProp != null, name = propName, parent = propParent };
 
                 case "create_boot_application":
 
@@ -751,7 +794,11 @@ namespace CodesysMcp
 
                     return CodesysOperations.PlcLogin(loginMode, delForeign, loginApp, devUser, devPass);
 
+                case "inspect_online":
 
+                    string inspectTarget = args.ContainsKey("target") ? args["target"]?.ToString() : "Device";
+
+                    return CodesysOperations.InspectOnline(inspectTarget);
 
                 case "plc_logout":
 
@@ -1616,14 +1663,75 @@ namespace CodesysMcp
 
                             implementation = new { type = "string", description = "Implementation code (ST code)" },
 
-                            type = new { type = "string", description = "Type of POU: Program, FunctionBlock, or Function", @enum = new[] { "Program", "FunctionBlock", "Function" } }
-
+                            type = new { type = "string", description = "Type of POU: Program, FunctionBlock, Function, Interface, Method, Property, Folder, DUT, Structure, Enumeration, or GVL" }
                         },
-
                         required = new[] { "name" }
-
                     }
-
+                },
+                new
+                {
+                    name = "create_folder",
+                    description = "Create a folder under active application or target parent folder in CODESYS project tree.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            name = new { type = "string", description = "Folder name" },
+                            parent = new { type = "string", description = "Parent folder or application path (optional)" }
+                        },
+                        required = new[] { "name" }
+                    }
+                },
+                new
+                {
+                    name = "create_interface",
+                    description = "Create an IEC 61131-3 Interface in CODESYS project tree.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            name = new { type = "string", description = "Interface name (e.g. 'ITF_TestCase')" },
+                            parent = new { type = "string", description = "Parent folder or application path (optional)" },
+                            base_interfaces = new { type = "string", description = "Base interfaces to extend (optional)" }
+                        },
+                        required = new[] { "name" }
+                    }
+                },
+                new
+                {
+                    name = "create_method",
+                    description = "Create a Method on a POU or Interface in CODESYS.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            parent = new { type = "string", description = "Parent POU or Interface name (e.g. 'FB_TestCase')" },
+                            name = new { type = "string", description = "Method name (e.g. 'AssertTrue')" },
+                            return_type = new { type = "string", description = "Return type (e.g. 'BOOL', optional)" },
+                            declaration = new { type = "string", description = "Declaration header and variables (optional)" },
+                            implementation = new { type = "string", description = "Method implementation code (optional)" }
+                        },
+                        required = new[] { "parent", "name" }
+                    }
+                },
+                new
+                {
+                    name = "create_property",
+                    description = "Create a Property on a POU or Interface in CODESYS.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            parent = new { type = "string", description = "Parent POU or Interface name" },
+                            name = new { type = "string", description = "Property name" },
+                            return_type = new { type = "string", description = "Property return type (e.g. 'STRING(80)')" }
+                        },
+                        required = new[] { "parent", "name" }
+                    }
                 },
 
                 new
@@ -1688,7 +1796,55 @@ namespace CodesysMcp
 
                     name = "get_compiler_messages",
 
-                    description = "Get all current compiler error and warning messages without re-triggering build.",
+                    description = "Get compiler errors, warnings and messages from CODESYS IDE (defaults to 'Build' category).",
+
+                    inputSchema = new
+
+                    {
+
+                        type = "object",
+
+                        properties = new
+
+                        {
+
+                            category = new
+
+                            {
+
+                                type = "string",
+
+                                description = "Message category to query: 'Build' (default, compiler/code generator), 'Precompile', 'Script Messages', or 'all'",
+
+                                @default = "Build"
+
+                            },
+
+                            min_severity = new
+
+                            {
+
+                                type = "string",
+
+                                description = "Minimum severity level: 'Error', 'Warning' (default), 'Information', 'Text'",
+
+                                @default = "Warning"
+
+                            }
+
+                        }
+
+                    }
+
+                },
+
+                new
+
+                {
+
+                    name = "get_message_categories",
+
+                    description = "Lists all message categories in CODESYS IDE (Build, Precompile, Script Messages, etc.) with error and warning counts.",
 
                     inputSchema = new
 
@@ -1911,6 +2067,32 @@ namespace CodesysMcp
                         type = "object",
 
                         properties = new { }
+
+                    }
+
+                },
+
+                new
+
+                {
+
+                    name = "inspect_online",
+
+                    description = "Inspect live online methods and device communication settings for diagnosis.",
+
+                    inputSchema = new
+
+                    {
+
+                        type = "object",
+
+                        properties = new
+
+                        {
+
+                            target = new { type = "string", description = "Target name to inspect (default 'Device')" }
+
+                        }
 
                     }
 

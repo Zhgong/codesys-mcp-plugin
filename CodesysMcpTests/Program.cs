@@ -121,7 +121,9 @@ namespace CodesysMcpTests
                 typeof(BatchRecipeTests),
                 typeof(IdeUiIndicatorTests),
                 typeof(TraceAndLoggerTests),
-                typeof(DeviceLoggerTests)
+                typeof(DeviceLoggerTests),
+                typeof(CompilerMessagesCategoryTests),
+                typeof(SessionLogSyncTests)
             };
 
             int passed = 0;
