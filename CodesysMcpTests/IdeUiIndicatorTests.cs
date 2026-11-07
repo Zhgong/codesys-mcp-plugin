@@ -130,7 +130,7 @@ namespace CodesysMcpTests
         {
             string version = CodesysIdeUiHelper.GetServerVersion();
             Assert.IsNotNull(version, "Server version should not be null");
-            Assert.AreEqual("1.2.1", version, "Version should match assembly and VERSION file (1.2.1)");
+            Assert.AreEqual("1.2.3", version, "Version should match assembly and VERSION file (1.2.3)");
         }
 
         [TestMethod]
@@ -189,6 +189,57 @@ namespace CodesysMcpTests
             Assert.IsTrue(banner.Contains("v" + CodesysIdeUiHelper.GetServerVersion()), "Banner must contain dynamic version");
             Assert.IsTrue(banner.Contains(McpServer.RegisteredToolCount + " Tools Available"), "Banner must contain live tool count");
             Assert.IsFalse(banner.Contains("v1.1.0"), "Banner must not contain stale v1.1.0");
+        }
+
+        [TestMethod]
+        public void TestDiagnosticsDialogCloseButtonClosesForm()
+        {
+            using (var form = CodesysIdeUiHelper.CreateDiagnosticsDialog())
+            {
+                Assert.IsNotNull(form, "Diagnostics form must not be null");
+                Assert.IsNotNull(form.AcceptButton, "Form should have AcceptButton configured");
+                Assert.IsNotNull(form.CancelButton, "Form should have CancelButton configured for Escape key support");
+
+                Control[] matching = form.Controls.Find("btnClose", true);
+                Assert.IsTrue(matching != null && matching.Length > 0, "Form must contain button with Name 'btnClose'");
+
+                var btnClose = matching[0] as Button;
+                Assert.IsNotNull(btnClose, "btnClose must be a Button control");
+                Assert.AreEqual("Close", btnClose.Text);
+
+                bool closed = false;
+                form.FormClosed += (s, e) => { closed = true; };
+
+                form.Show();
+                Assert.IsTrue(form.Visible, "Form should be visible after Show()");
+
+                // Simulate user clicking Close button
+                btnClose.PerformClick();
+                Application.DoEvents();
+
+                Assert.IsTrue(closed || !form.Visible || form.IsDisposed, "Clicking Close button must close form");
+            }
+        }
+
+        [TestMethod]
+        public void TestDiagnosticsDialogEscapeKeyClosesForm()
+        {
+            using (var form = CodesysIdeUiHelper.CreateDiagnosticsDialog())
+            {
+                Assert.IsTrue(form.KeyPreview, "KeyPreview must be true to capture Escape key");
+
+                bool closed = false;
+                form.FormClosed += (s, e) => { closed = true; };
+
+                form.Show();
+                Assert.IsTrue(form.Visible, "Form should be visible after Show()");
+
+                // Simulate user triggering CancelButton (Esc)
+                form.CancelButton.PerformClick();
+                Application.DoEvents();
+
+                Assert.IsTrue(closed || !form.Visible || form.IsDisposed, "Triggering CancelButton (Esc) must close form");
+            }
         }
     }
 }

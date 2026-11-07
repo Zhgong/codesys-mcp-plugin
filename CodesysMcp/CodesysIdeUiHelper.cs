@@ -594,7 +594,7 @@ namespace CodesysMcp
                    $"Timestamp           : {DateTime.Now:yyyy-MM-dd HH:mm:ss}\r\n";
         }
 
-        public static void ShowDiagnosticsDialog()
+        public static Form CreateDiagnosticsDialog()
         {
             var form = new Form
             {
@@ -604,7 +604,8 @@ namespace CodesysMcp
                 MinimizeBox = false,
                 StartPosition = FormStartPosition.CenterScreen,
                 Size = new Size(480, 360),
-                BackColor = Color.White
+                BackColor = Color.White,
+                KeyPreview = true
             };
 
             var tb = new TextBox
@@ -621,18 +622,67 @@ namespace CodesysMcp
             var btnPanel = new Panel { Dock = DockStyle.Bottom, Height = 45, BackColor = Color.FromArgb(240, 240, 240) };
             var btnClose = new Button
             {
+                Name = "btnClose",
                 Text = "Close",
                 DialogResult = DialogResult.OK,
                 Size = new Size(85, 28),
                 Location = new Point(btnPanel.Width - 100, 8),
                 Anchor = AnchorStyles.Bottom | AnchorStyles.Right
             };
+            btnClose.Click += (s, e) =>
+            {
+                try
+                {
+                    form.Close();
+                }
+                catch { }
+            };
             btnPanel.Controls.Add(btnClose);
 
             form.Controls.Add(tb);
             form.Controls.Add(btnPanel);
             form.AcceptButton = btnClose;
-            form.Show();
+            form.CancelButton = btnClose;
+
+            form.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Escape)
+                {
+                    try
+                    {
+                        form.Close();
+                    }
+                    catch { }
+                }
+            };
+
+            return form;
+        }
+
+        public static void ShowDiagnosticsDialog()
+        {
+            var form = CreateDiagnosticsDialog();
+            Form owner = null;
+            try
+            {
+                owner = _hostStatusStrip?.FindForm() ?? (_3S.CoDeSys.Core.SystemInstances.FrameForm as Form);
+            }
+            catch { }
+
+            if (owner != null && !owner.IsDisposed && owner.IsHandleCreated)
+            {
+                form.Show(owner);
+            }
+            else
+            {
+                form.Show();
+            }
+
+            try
+            {
+                form.Activate();
+            }
+            catch { }
         }
     }
 }

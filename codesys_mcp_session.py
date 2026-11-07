@@ -127,10 +127,12 @@ try:
         except Exception as e:
             log("Warning: could not open project on startup: %s" % str(e))
 
+    banner_msg = "[CODESYS MCP] Native Stdio/Pipe MCP Server v%s started on \\\\.\\pipe\\%s (GUI Unlocked, %s Tools Available)" % (server_version, pipe_name, tool_count)
+    log(banner_msg)
     try:
         system.write_message(
             Severity.Information,
-            "[CODESYS MCP] Native Stdio/Pipe MCP Server v%s started on \\\\.\\pipe\\%s (GUI Unlocked, %s Tools Available)" % (server_version, pipe_name, tool_count)
+            banner_msg
         )
     except:
         pass

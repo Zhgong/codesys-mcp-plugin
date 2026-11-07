@@ -222,6 +222,8 @@ namespace CodesysMcp
 
     {
 
+        public string category { get; set; }
+
         public string text { get; set; }
 
         public string severity { get; set; }
@@ -237,6 +239,30 @@ namespace CodesysMcp
         public int line { get; set; }
 
         public int column { get; set; }
+
+    }
+
+    public class MessageCategoryInfo
+
+    {
+
+        public string name { get; set; }
+
+        public string guid { get; set; }
+
+        public int totalMessages { get; set; }
+
+        public int errors { get; set; }
+
+        public int warnings { get; set; }
+
+    }
+
+    public class MessageCategoriesResult
+
+    {
+
+        public List<MessageCategoryInfo> categories { get; set; } = new List<MessageCategoryInfo>();
 
     }
 
@@ -646,10 +672,11 @@ namespace CodesysMcp
 
             if (string.IsNullOrEmpty(name)) return null;
 
-            // Support dot notation: e.g. "FB_Test_ForceSensor.Reset"
-            if (name.Contains("."))
+            // Support dot or slash notation: e.g. "FB_Test_ForceSensor.Reset" or "Tests/Framework/FB_TestCase"
+            if (name.Contains(".") || name.Contains("/"))
             {
-                var dotIdx = name.LastIndexOf('.');
+                char sep = name.Contains("/") ? '/' : '.';
+                var dotIdx = name.LastIndexOf(sep);
                 var parentName = name.Substring(0, dotIdx);
                 var childName = name.Substring(dotIdx + 1);
 
@@ -898,91 +925,107 @@ namespace CodesysMcp
 
 
                 if (extObj == null)
-
                 {
-
                     var projExt = CodesysContext.PrimaryProjectExtended;
-
                     if (projExt == null) throw new InvalidOperationException("No active project open.");
 
-
-
                     var appExt = GetActiveApplicationObject(projExt.BaseObject);
+                    object targetContainerObj = appExt ?? projExt.BaseObject;
+                    string leafName = name;
 
-                    var container = GetExtension<IScriptIecLanguageObjectContainer>(appExt)
-
-                                 ?? GetExtension<IScriptIecLanguageObjectContainer>(projExt);
-
-
-
-                    if (container == null)
-
+                    if (name.Contains(".") || name.Contains("/"))
                     {
+                        char sep = name.Contains("/") ? '/' : '.';
+                        int lastSep = name.LastIndexOf(sep);
+                        string parentPath = name.Substring(0, lastSep);
+                        leafName = name.Substring(lastSep + 1);
 
-                        throw new InvalidOperationException("Could not resolve IScriptIecLanguageObjectContainer on active application or project.");
-
+                        if (string.Equals(pouTypeStr, "Method", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(pouTypeStr, "Property", StringComparison.OrdinalIgnoreCase))
+                        {
+                            targetContainerObj = FindObjectByName(parentPath);
+                            if (targetContainerObj == null)
+                            {
+                                throw new InvalidOperationException($"Parent POU/Interface '{parentPath}' not found for {pouTypeStr} '{leafName}'.");
+                            }
+                        }
+                        else
+                        {
+                            targetContainerObj = EnsureFolderPath(parentPath);
+                        }
                     }
 
-
-
-                    if (string.Equals(pouTypeStr, "DUT", StringComparison.OrdinalIgnoreCase) ||
-
-                        string.Equals(pouTypeStr, "Structure", StringComparison.OrdinalIgnoreCase))
-
+                    if (string.Equals(pouTypeStr, "Folder", StringComparison.OrdinalIgnoreCase))
                     {
-
-                        extObj = container.create_dut(name, DutType.Structure, null);
-
+                        var folderCreator = targetContainerObj as IScriptObject3 ?? GetExtension<IScriptObject3>(targetContainerObj);
+                        if (folderCreator == null) throw new InvalidOperationException($"Cannot create folder under '{targetContainerObj}'.");
+                        folderCreator.create_folder(leafName);
+                        var tree = targetContainerObj as IScriptTreeObject ?? GetExtension<IScriptTreeObject>(targetContainerObj);
+                        var matches = tree?.find(leafName, false);
+                        extObj = (matches != null && matches.Count > 0) ? matches[0] : null;
                     }
-
-                    else if (string.Equals(pouTypeStr, "Enumeration", StringComparison.OrdinalIgnoreCase))
-
+                    else if (string.Equals(pouTypeStr, "Method", StringComparison.OrdinalIgnoreCase))
                     {
-
-                        extObj = container.create_dut(name, DutType.Enumeration, null);
-
+                        var memberContainer = targetContainerObj as IScriptIecLanguageMemberContainer
+                                           ?? GetExtension<IScriptIecLanguageMemberContainer>(targetContainerObj);
+                        if (memberContainer == null) throw new InvalidOperationException($"Parent '{targetContainerObj}' does not support creating methods.");
+                        string returnType = ExtractReturnTypeFromDeclaration(declaration);
+                        extObj = memberContainer.create_method(leafName, returnType, null);
                     }
-
-                    else if (string.Equals(pouTypeStr, "GVL", StringComparison.OrdinalIgnoreCase))
-
+                    else if (string.Equals(pouTypeStr, "Property", StringComparison.OrdinalIgnoreCase))
                     {
-
-                        extObj = container.create_gvl(name);
-
+                        var memberContainer = targetContainerObj as IScriptIecLanguageMemberContainer
+                                           ?? GetExtension<IScriptIecLanguageMemberContainer>(targetContainerObj);
+                        if (memberContainer == null) throw new InvalidOperationException($"Parent '{targetContainerObj}' does not support creating properties.");
+                        string returnType = ExtractReturnTypeFromDeclaration(declaration);
+                        extObj = memberContainer.create_property(leafName, returnType, null);
                     }
-
                     else
-
                     {
+                        var container = targetContainerObj as IScriptIecLanguageObjectContainer
+                                     ?? GetExtension<IScriptIecLanguageObjectContainer>(targetContainerObj)
+                                     ?? GetExtension<IScriptIecLanguageObjectContainer>(appExt)
+                                     ?? GetExtension<IScriptIecLanguageObjectContainer>(projExt);
 
-                        PouType pouType = PouType.Program;
-
-                        string returnType = null;
-
-                        if (string.Equals(pouTypeStr, "FunctionBlock", StringComparison.OrdinalIgnoreCase))
-
+                        if (container == null)
                         {
-
-                            pouType = PouType.FunctionBlock;
-
+                            throw new InvalidOperationException("Could not resolve IScriptIecLanguageObjectContainer on target container, active application or project.");
                         }
 
-                        else if (string.Equals(pouTypeStr, "Function", StringComparison.OrdinalIgnoreCase))
-
+                        if (string.Equals(pouTypeStr, "Interface", StringComparison.OrdinalIgnoreCase))
                         {
-
-                            pouType = PouType.Function;
-
-                            returnType = "BOOL";
-
+                            extObj = container.create_interface(leafName, null);
                         }
+                        else if (string.Equals(pouTypeStr, "DUT", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(pouTypeStr, "Structure", StringComparison.OrdinalIgnoreCase))
+                        {
+                            extObj = container.create_dut(leafName, DutType.Structure, null);
+                        }
+                        else if (string.Equals(pouTypeStr, "Enumeration", StringComparison.OrdinalIgnoreCase))
+                        {
+                            extObj = container.create_dut(leafName, DutType.Enumeration, null);
+                        }
+                        else if (string.Equals(pouTypeStr, "GVL", StringComparison.OrdinalIgnoreCase))
+                        {
+                            extObj = container.create_gvl(leafName);
+                        }
+                        else
+                        {
+                            PouType pouType = PouType.Program;
+                            string returnType = null;
+                            if (string.Equals(pouTypeStr, "FunctionBlock", StringComparison.OrdinalIgnoreCase))
+                            {
+                                pouType = PouType.FunctionBlock;
+                            }
+                            else if (string.Equals(pouTypeStr, "Function", StringComparison.OrdinalIgnoreCase))
+                            {
+                                pouType = PouType.Function;
+                                returnType = ExtractReturnTypeFromDeclaration(declaration) ?? "BOOL";
+                            }
 
-
-
-                        extObj = container.create_pou(name, pouType, null, returnType, null, null);
-
+                            extObj = container.create_pou(leafName, pouType, null, returnType, null, null);
+                        }
                     }
-
                 }
 
 
@@ -1016,12 +1059,135 @@ namespace CodesysMcp
 
 
                 return ReadPou(name);
-
             });
-
         }
 
+        public static object EnsureFolderPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            var parts = path.Split(new[] { '/', '.' }, StringSplitOptions.RemoveEmptyEntries);
 
+            var projExt = CodesysContext.PrimaryProjectExtended;
+            if (projExt == null) throw new InvalidOperationException("No active project open.");
+            var current = GetActiveApplicationObject(projExt.BaseObject) ?? projExt.BaseObject;
+
+            foreach (var part in parts)
+            {
+                var tree = current as IScriptTreeObject ?? GetExtension<IScriptTreeObject>(current);
+                object next = null;
+                if (tree != null)
+                {
+                    var matches = tree.find(part, false);
+                    if (matches != null && matches.Count > 0)
+                    {
+                        next = matches[0];
+                    }
+                }
+
+                if (next == null)
+                {
+                    var folderCreator = current as IScriptObject3 ?? GetExtension<IScriptObject3>(current);
+                    if (folderCreator == null)
+                    {
+                        throw new InvalidOperationException($"Cannot create folder '{part}' under object '{current}'.");
+                    }
+                    folderCreator.create_folder(part);
+                    tree = current as IScriptTreeObject ?? GetExtension<IScriptTreeObject>(current);
+                    var matches = tree?.find(part, false);
+                    next = (matches != null && matches.Count > 0) ? matches[0] : null;
+                }
+                current = next;
+            }
+            return current;
+        }
+
+        private static string ExtractReturnTypeFromDeclaration(string declaration)
+        {
+            if (string.IsNullOrWhiteSpace(declaration)) return null;
+            var match = System.Text.RegularExpressions.Regex.Match(
+                declaration,
+                @"(?:METHOD|FUNCTION|PROPERTY)\s+(?:PRIVATE\s+|PROTECTED\s+|INTERNAL\s+|PUBLIC\s+)?(?:\w+)\s*:\s*([A-Za-z0-9_()]+)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            );
+            return match.Success ? match.Groups[1].Value : null;
+        }
+
+        public static object CreateFolder(string name, string parentPath = null)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var targetParent = string.IsNullOrEmpty(parentPath)
+                    ? (GetActiveApplicationObject(CodesysContext.PrimaryProject) ?? CodesysContext.PrimaryProject)
+                    : EnsureFolderPath(parentPath);
+
+                var folderCreator = targetParent as IScriptObject3 ?? GetExtension<IScriptObject3>(targetParent);
+                if (folderCreator == null)
+                    throw new InvalidOperationException($"Cannot create folder under '{targetParent}'.");
+
+                folderCreator.create_folder(name);
+                var tree = targetParent as IScriptTreeObject ?? GetExtension<IScriptTreeObject>(targetParent);
+                var matches = tree?.find(name, false);
+                return (matches != null && matches.Count > 0) ? matches[0] : null;
+            });
+        }
+
+        public static object CreateInterface(string name, string parentPath = null, string baseInterfaces = null)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var targetParent = string.IsNullOrEmpty(parentPath)
+                    ? (GetActiveApplicationObject(CodesysContext.PrimaryProject) ?? CodesysContext.PrimaryProject)
+                    : EnsureFolderPath(parentPath);
+
+                var container = targetParent as IScriptIecLanguageObjectContainer
+                             ?? GetExtension<IScriptIecLanguageObjectContainer>(targetParent);
+                if (container == null)
+                    throw new InvalidOperationException($"Cannot resolve IScriptIecLanguageObjectContainer under '{targetParent}'.");
+
+                return container.create_interface(name, baseInterfaces);
+            });
+        }
+
+        public static PouContentResult CreateMethod(string parentPou, string name, string returnType = null, string declaration = null, string implementation = null)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var parent = FindObjectByName(parentPou);
+                if (parent == null) throw new InvalidOperationException($"Parent POU/Interface '{parentPou}' not found.");
+
+                var memberContainer = parent as IScriptIecLanguageMemberContainer
+                                   ?? GetExtension<IScriptIecLanguageMemberContainer>(parent);
+                if (memberContainer == null) throw new InvalidOperationException($"Parent '{parentPou}' does not support creating methods.");
+
+                var extObj = memberContainer.create_method(name, returnType, null);
+                if (declaration != null)
+                {
+                    var declExt = GetExtension<IScriptObjectWithTextualDeclaration>(extObj);
+                    declExt?.textual_declaration?.replace(declaration);
+                }
+                if (implementation != null)
+                {
+                    var implExt = GetExtension<IScriptObjectWithTextualImplementation>(extObj);
+                    implExt?.textual_implementation?.replace(implementation);
+                }
+                return ReadPou($"{parentPou}.{name}");
+            });
+        }
+
+        public static object CreateProperty(string parentPou, string name, string returnType = null)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var parent = FindObjectByName(parentPou);
+                if (parent == null) throw new InvalidOperationException($"Parent POU/Interface '{parentPou}' not found.");
+
+                var memberContainer = parent as IScriptIecLanguageMemberContainer
+                                   ?? GetExtension<IScriptIecLanguageMemberContainer>(parent);
+                if (memberContainer == null) throw new InvalidOperationException($"Parent '{parentPou}' does not support creating properties.");
+
+                return memberContainer.create_property(name, returnType, null);
+            });
+        }
 
         public static bool DeletePou(string name)
 
@@ -1139,7 +1305,7 @@ namespace CodesysMcp
 
 
 
-        public static CompileResult CollectCompilerMessages()
+        public static CompileResult CollectCompilerMessages(string category = "Build", string minSeverity = "Warning")
 
         {
 
@@ -1157,89 +1323,197 @@ namespace CodesysMcp
 
                 {
 
-                    var messages = sys3.get_message_objects();
+                    var categoriesToQuery = new List<string>();
 
-                    if (messages != null)
+                    if (string.IsNullOrEmpty(category) || string.Equals(category, "Build", StringComparison.OrdinalIgnoreCase))
 
                     {
 
-                        foreach (var msg in messages)
+                        categoriesToQuery.Add("Build");
+
+                    }
+
+                    else if (string.Equals(category, "all", StringComparison.OrdinalIgnoreCase))
+
+                    {
+
+                        categoriesToQuery.Add("Build");
+
+                        categoriesToQuery.Add("Precompile");
+
+                        categoriesToQuery.Add("Script Messages");
+
+                        categoriesToQuery.Add("Application Composer");
+
+                    }
+
+                    else
+
+                    {
+
+                        categoriesToQuery.Add(category);
+
+                    }
+
+
+
+                    _3S.CoDeSys.Core.Messages.Severity sevMask = (_3S.CoDeSys.Core.Messages.Severity)31;
+
+
+
+                    foreach (var catName in categoriesToQuery)
+
+                    {
+
+                        System.Collections.Generic.IList<IScriptMessage> messages = null;
+
+                        try
 
                         {
 
-                            var scriptMsg = msg as IScriptMessage;
+                            messages = sys3.get_message_objects(catName, sevMask);
 
-                            if (scriptMsg == null) continue;
+                        }
 
+                        catch
 
+                        {
 
-                            string severity = scriptMsg.severity.ToString();
-
-                            string text = scriptMsg.text ?? string.Empty;
-
-                            int number = (int)(scriptMsg.number ?? 0);
-
-                            string prefix = scriptMsg.prefix ?? string.Empty;
-
-                            string posText = scriptMsg.position_text ?? string.Empty;
-
-
-
-                            var targetObj = scriptMsg.@object;
-
-                            string objName = null;
-
-                            if (targetObj != null)
+                            try
 
                             {
 
-                                var extObj = targetObj as IExtendedObject<IScriptObject>;
-
-                                if (extObj != null) objName = extObj.BaseObject.get_name();
-
-                                else if (targetObj is IScriptObject so) objName = so.get_name();
+                                messages = sys3.get_message_objects();
 
                             }
 
+                            catch { }
+
+                        }
 
 
-                            if (severity.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0 ||
 
-                                severity.IndexOf("Fatal", StringComparison.OrdinalIgnoreCase) >= 0)
+                        if (messages != null)
+
+                        {
+
+                            foreach (var msg in messages)
 
                             {
 
-                                res.errorCount++;
+                                var scriptMsg = msg as IScriptMessage;
+
+                                if (scriptMsg == null) continue;
+
+
+
+                                string severity = scriptMsg.severity.ToString();
+
+                                string text = scriptMsg.text ?? string.Empty;
+
+                                int number = (int)(scriptMsg.number ?? 0);
+
+                                string prefix = scriptMsg.prefix ?? string.Empty;
+
+                                string posText = scriptMsg.position_text ?? string.Empty;
+
+
+
+                                bool isError = severity.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0 ||
+
+                                               severity.IndexOf("Fatal", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                                bool isWarning = severity.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                                bool isInfo = severity.IndexOf("Information", StringComparison.OrdinalIgnoreCase) >= 0 ||
+
+                                              severity.IndexOf("Info", StringComparison.OrdinalIgnoreCase) >= 0;
+
+
+
+                                if (isError)
+
+                                {
+
+                                    res.errorCount++;
+
+                                }
+
+                                else if (isWarning)
+
+                                {
+
+                                    res.warningCount++;
+
+                                }
+
+
+
+                                if (string.Equals(minSeverity, "Error", StringComparison.OrdinalIgnoreCase) && !isError)
+
+                                {
+
+                                    continue;
+
+                                }
+
+                                if (string.Equals(minSeverity, "Warning", StringComparison.OrdinalIgnoreCase) && !isError && !isWarning)
+
+                                {
+
+                                    continue;
+
+                                }
+
+                                if (string.Equals(minSeverity, "Information", StringComparison.OrdinalIgnoreCase) && !isError && !isWarning && !isInfo)
+
+                                {
+
+                                    continue;
+
+                                }
+
+
+
+                                var targetObj = scriptMsg.@object;
+
+                                string objName = null;
+
+                                if (targetObj != null)
+
+                                {
+
+                                    var extObj = targetObj as IExtendedObject<IScriptObject>;
+
+                                    if (extObj != null) objName = extObj.BaseObject.get_name();
+
+                                    else if (targetObj is IScriptObject so) objName = so.get_name();
+
+                                }
+
+
+
+                                res.messages.Add(new CompilerMessageResult
+
+                                {
+
+                                    category = catName,
+
+                                    text = text,
+
+                                    severity = severity,
+
+                                    number = number,
+
+                                    prefix = prefix,
+
+                                    objectName = objName,
+
+                                    positionText = posText
+
+                                });
 
                             }
-
-                            else if (severity.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) >= 0)
-
-                            {
-
-                                res.warningCount++;
-
-                            }
-
-
-
-                            res.messages.Add(new CompilerMessageResult
-
-                            {
-
-                                text = text,
-
-                                severity = severity,
-
-                                number = number,
-
-                                prefix = prefix,
-
-                                objectName = objName,
-
-                                positionText = posText
-
-                            });
 
                         }
 
@@ -1252,6 +1526,196 @@ namespace CodesysMcp
                 res.success = res.errorCount == 0;
 
                 return res;
+
+            });
+
+        }
+
+
+
+        public static MessageCategoriesResult GetMessageCategories()
+
+        {
+
+            var result = new MessageCategoriesResult();
+
+            var sys3 = CodesysContext.System as ISystem3;
+
+            if (sys3 == null)
+
+            {
+
+                result.categories.Add(new MessageCategoryInfo { name = "Build", guid = "", totalMessages = 0, errors = 0, warnings = 0 });
+
+                result.categories.Add(new MessageCategoryInfo { name = "Precompile", guid = "", totalMessages = 0, errors = 0, warnings = 0 });
+
+                result.categories.Add(new MessageCategoryInfo { name = "Script Messages", guid = "{194B48A9-AB51-43ae-B9A9-51D3EDAADDF3}", totalMessages = 0, errors = 0, warnings = 0 });
+
+                result.categories.Add(new MessageCategoryInfo { name = "Application Composer", guid = "", totalMessages = 0, errors = 0, warnings = 0 });
+
+                return result;
+
+            }
+
+
+
+            return CodesysContext.RunOnPrimaryThread(() =>
+
+            {
+
+                var knownNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                try
+
+                {
+
+                    var catGuids = sys3.get_message_categories(false);
+
+                    if (catGuids != null)
+
+                    {
+
+                        foreach (var g in catGuids)
+
+                        {
+
+                            string desc = null;
+
+                            try { desc = sys3.get_message_category_description(g); } catch { }
+
+                            string name = !string.IsNullOrEmpty(desc) ? desc : g.ToString();
+
+                            knownNames.Add(name);
+
+
+
+                            int total = 0, errs = 0, warns = 0;
+
+                            try
+
+                            {
+
+                                var msgs = sys3.get_message_objects(g, (_3S.CoDeSys.Core.Messages.Severity)31);
+
+                                if (msgs != null)
+
+                                {
+
+                                    total = msgs.Count;
+
+                                    foreach (var m in msgs)
+
+                                    {
+
+                                        string sev = m.severity.ToString();
+
+                                        if (sev.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0 || sev.IndexOf("Fatal", StringComparison.OrdinalIgnoreCase) >= 0) errs++;
+
+                                        else if (sev.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) >= 0) warns++;
+
+                                    }
+
+                                }
+
+                            }
+
+                            catch { }
+
+
+
+                            result.categories.Add(new MessageCategoryInfo
+
+                            {
+
+                                name = name,
+
+                                guid = g.ToString(),
+
+                                totalMessages = total,
+
+                                errors = errs,
+
+                                warnings = warns
+
+                            });
+
+                        }
+
+                    }
+
+                }
+
+                catch { }
+
+
+
+                var standardCats = new[] { "Build", "Precompile", "Script Messages" };
+
+                foreach (var std in standardCats)
+
+                {
+
+                    if (!knownNames.Contains(std))
+
+                    {
+
+                        int total = 0, errs = 0, warns = 0;
+
+                        try
+
+                        {
+
+                            var msgs = sys3.get_message_objects(std, (_3S.CoDeSys.Core.Messages.Severity)31);
+
+                            if (msgs != null)
+
+                            {
+
+                                total = msgs.Count;
+
+                                foreach (var m in msgs)
+
+                                {
+
+                                    string sev = m.severity.ToString();
+
+                                    if (sev.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0 || sev.IndexOf("Fatal", StringComparison.OrdinalIgnoreCase) >= 0) errs++;
+
+                                    else if (sev.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) >= 0) warns++;
+
+                                }
+
+                            }
+
+                        }
+
+                        catch { }
+
+
+
+                        result.categories.Add(new MessageCategoryInfo
+
+                        {
+
+                            name = std,
+
+                            guid = string.Empty,
+
+                            totalMessages = total,
+
+                            errors = errs,
+
+                            warnings = warns
+
+                        });
+
+                    }
+
+                }
+
+
+
+                return result;
 
             });
 
@@ -2228,6 +2692,14 @@ namespace CodesysMcp
         {
 
             return CodesysOnlineHelper.PlcLogin(mode, deleteForeignApps, appName, username, password);
+
+        }
+
+        public static object InspectOnline(string targetName = "Device")
+
+        {
+
+            return CodesysOnlineHelper.InspectOnline(targetName);
 
         }
 

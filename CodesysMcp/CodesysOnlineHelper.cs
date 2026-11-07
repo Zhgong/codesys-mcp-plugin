@@ -2,8 +2,11 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
+using _3S.CoDeSys.ScriptEngine;
+using _3S.CoDeSys.ScriptEngine.BasicFunctionality;
 
 namespace CodesysMcp
 {
@@ -1144,6 +1147,256 @@ namespace CodesysMcp
                 app.create_boot_application(null);
                 CodesysContext.LogToIde("create_boot_application: Successfully created boot project for application");
                 return "Boot application created successfully.";
+            });
+        }
+
+        public static object InspectOnline(string targetName = "Device")
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var dict = new Dictionary<string, object>();
+                
+                if (CodesysContext.Online != null)
+                {
+                    dict["online_type"] = CodesysContext.Online.GetType().FullName;
+                    var onlineMethods = new List<string>();
+                    foreach (var m in CodesysContext.Online.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                    {
+                        onlineMethods.Add($"{m.ReturnType.Name} {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name + " " + p.Name))})");
+                    }
+                    dict["online_methods"] = onlineMethods;
+
+                    try
+                    {
+                        var getGateways = CodesysContext.Online.GetType().GetMethod("get_gateways");
+                        var gwObj = getGateways?.Invoke(CodesysContext.Online, null);
+                        if (gwObj != null)
+                        {
+                            dict["gateways_type"] = gwObj.GetType().FullName;
+                            var gwMethods = new List<string>();
+                            foreach (var m in gwObj.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                            {
+                                gwMethods.Add($"{m.ReturnType.Name} {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name + " " + p.Name))})");
+                            }
+                            dict["gateways_methods"] = gwMethods;
+
+                            // Scan Gateway-1
+                            try
+                            {
+                                if (gwObj is IEnumerable gwEnumScan)
+                                {
+                                    foreach (var g in gwEnumScan)
+                                    {
+                                        var scanMethod = g.GetType().GetMethod("perform_network_scan");
+                                        if (scanMethod != null)
+                                        {
+                                            var scanRes = scanMethod.Invoke(g, null) as IEnumerable;
+                                            var scannedList = new List<Dictionary<string, object>>();
+                                            if (scanRes != null)
+                                            {
+                                                foreach (var item in scanRes)
+                                                {
+                                                    var idict = new Dictionary<string, object>();
+                                                    idict["type"] = item.GetType().FullName;
+                                                    var iprops = new List<string>();
+                                                    foreach (var prop in item.GetType().GetProperties())
+                                                    {
+                                                        try { iprops.Add($"{prop.Name} = {prop.GetValue(item, null)}"); } catch { }
+                                                    }
+                                                    idict["properties"] = iprops;
+                                                    scannedList.Add(idict);
+                                                }
+                                            }
+                                            dict["scanned_devices"] = scannedList;
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                            catch (Exception scEx)
+                            {
+                                dict["scan_error"] = scEx.ToString();
+                            }
+
+                            // If enumerable, list gateways
+                            var gwList = new List<Dictionary<string, object>>();
+                            if (gwObj is IEnumerable gwEnum)
+                            {
+                                foreach (var g in gwEnum)
+                                {
+                                    var gd = new Dictionary<string, object>();
+                                    gd["type"] = g.GetType().FullName;
+                                    var gp = new List<string>();
+                                    foreach (var p in g.GetType().GetProperties())
+                                    {
+                                        try { gp.Add($"{p.Name} = {p.GetValue(g, null)}"); } catch { }
+                                    }
+                                    gd["properties"] = gp;
+                                    var gm = new List<string>();
+                                    foreach (var m in g.GetType().GetMethods())
+                                    {
+                                        gm.Add($"{m.ReturnType.Name} {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name + " " + p.Name))})");
+                                    }
+                                    gd["methods"] = gm;
+                                    gwList.Add(gd);
+                                }
+                            }
+                            dict["gateways_list"] = gwList;
+                        }
+                    }
+                    catch (Exception gwx)
+                    {
+                        dict["gateways_error"] = gwx.ToString();
+                    }
+                }
+
+                var devObj = CodesysOperations.FindObjectByName(targetName);
+                if (devObj != null)
+                {
+                    // Inspect message categories
+                    try
+                    {
+                        var sys3 = CodesysContext.System as ISystem3;
+                        if (sys3 != null)
+                        {
+                            var catList = new List<Dictionary<string, object>>();
+                            foreach (var cat in sys3.get_message_categories())
+                            {
+                                var cd = new Dictionary<string, object>();
+                                cd["guid"] = cat.ToString();
+                                var msgs = sys3.get_message_objects(cat);
+                                cd["count"] = msgs != null ? msgs.Count : 0;
+                                var sample = new List<string>();
+                                if (msgs != null)
+                                {
+                                    foreach (var m in msgs)
+                                    {
+                                        if (m is IScriptMessage sm)
+                                        {
+                                            sample.Add($"[{sm.severity}] {sm.prefix}{sm.number}: {sm.text}");
+                                        }
+                                    }
+                                }
+                                cd["messages"] = sample;
+                                catList.Add(cd);
+                            }
+                            dict["message_categories"] = catList;
+                        }
+                    }
+                    catch (Exception mex)
+                    {
+                        dict["message_categories_error"] = mex.ToString();
+                    }
+                    dict["target_type"] = devObj.GetType().FullName;
+                    var extList = new List<string>();
+                    var extProps = new Dictionary<string, object>();
+                    var ext = devObj as IExtendedObject<IScriptObject>;
+                    if (ext != null && ext.Extensions != null)
+                    {
+                        foreach (var e in ext.Extensions)
+                        {
+                            string eType = e.GetType().FullName;
+                            extList.Add(eType);
+                            var pList = new List<string>();
+                            foreach (var prop in e.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                            {
+                                try
+                                {
+                                    var val = prop.GetValue(e, null);
+                                    pList.Add($"{prop.Name} = {val}");
+                                }
+                                catch (Exception px)
+                                {
+                                    pList.Add($"{prop.Name} = <ERR: {px.Message}>");
+                                }
+                            }
+                            extProps[eType] = pList;
+                        }
+                    }
+                    dict["extensions"] = extList;
+                    dict["extension_properties"] = extProps;
+
+                    // Inspect connectors
+                    var connInfo = new List<Dictionary<string, object>>();
+                    if (ext != null && ext.Extensions != null)
+                    {
+                        foreach (var e in ext.Extensions)
+                    {
+                        var connProp = e.GetType().GetProperty("connectors");
+                        if (connProp != null)
+                        {
+                            var connSet = connProp.GetValue(e, null) as IEnumerable;
+                            if (connSet != null)
+                            {
+                                foreach (var c in connSet)
+                                {
+                                    var cd = new Dictionary<string, object>();
+                                    cd["type"] = c.GetType().FullName;
+                                    var cProps = new List<string>();
+                                    foreach (var cp in c.GetType().GetProperties())
+                                    {
+                                        try { cProps.Add($"{cp.Name} = {cp.GetValue(c, null)}"); }
+                                        catch (Exception cpx) { cProps.Add($"{cp.Name} = <ERR: {cpx.Message}>"); }
+                                    }
+                                    cd["properties"] = cProps;
+
+                                    var cMethods = new List<string>();
+                                    foreach (var cm in c.GetType().GetMethods())
+                                    {
+                                        cMethods.Add($"{cm.ReturnType.Name} {cm.Name}({string.Join(", ", cm.GetParameters().Select(p => p.ParameterType.Name + " " + p.Name))})");
+                                    }
+                                    cd["methods"] = cMethods;
+                                    connInfo.Add(cd);
+                                }
+                            }
+                        }
+                    }
+                    }
+                    dict["connectors"] = connInfo;
+
+                    var methods = new List<string>();
+                    foreach (var m in devObj.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                    {
+                        methods.Add($"{m.ReturnType.Name} {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name + " " + p.Name))})");
+                    }
+                    dict["target_methods"] = methods;
+
+                    if (CodesysContext.Online != null)
+                    {
+                        try
+                        {
+                            MethodInfo createDevMethod = null;
+                            foreach (var cm in CodesysContext.Online.GetType().GetMethods())
+                            {
+                                if (cm.Name == "create_online_device")
+                                {
+                                    createDevMethod = cm;
+                                    break;
+                                }
+                            }
+                            if (createDevMethod != null)
+                            {
+                                var odev = createDevMethod.Invoke(CodesysContext.Online, new object[] { devObj });
+                                if (odev != null)
+                                {
+                                    dict["online_device_type"] = odev.GetType().FullName;
+                                    var odevMethods = new List<string>();
+                                    foreach (var m in odev.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                                    {
+                                        odevMethods.Add($"{m.ReturnType.Name} {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name + " " + p.Name))})");
+                                    }
+                                    dict["online_device_methods"] = odevMethods;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            dict["create_online_device_error"] = ex.ToString();
+                        }
+                    }
+                }
+
+                return dict;
             });
         }
     }
