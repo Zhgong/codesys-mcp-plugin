@@ -124,5 +124,71 @@ namespace CodesysMcpTests
             Assert.AreEqual("Offline", info.status);
             Assert.AreEqual(McpServerStatus.Offline, CodesysIdeUiHelper.CurrentStatus);
         }
+
+        [TestMethod]
+        public void TestGetServerVersionReturnsAssemblyVersion()
+        {
+            string version = CodesysIdeUiHelper.GetServerVersion();
+            Assert.IsNotNull(version, "Server version should not be null");
+            Assert.AreEqual("1.2.1", version, "Version should match assembly and VERSION file (1.2.1)");
+        }
+
+        [TestMethod]
+        public void TestTooltipTextContainsDynamicVersion()
+        {
+            string tooltip = CodesysIdeUiHelper.BuildTooltipText();
+            Assert.IsNotNull(tooltip, "Tooltip text should not be null");
+            Assert.IsTrue(tooltip.Contains("CODESYS MCP Server v" + CodesysIdeUiHelper.GetServerVersion()), "Tooltip should contain dynamic version");
+            Assert.IsFalse(tooltip.Contains("v1.1.0"), "Tooltip should not contain stale hardcoded v1.1.0");
+        }
+
+        [TestMethod]
+        public void TestDiagnosticsReportContainsDynamicVersionAndToolCount()
+        {
+            string diag = CodesysIdeUiHelper.BuildDiagnosticsText();
+            Assert.IsNotNull(diag, "Diagnostics text should not be null");
+            Assert.IsTrue(diag.Contains("CODESYS MCP Native Server v" + CodesysIdeUiHelper.GetServerVersion()), "Diagnostics should contain dynamic version");
+            Assert.IsFalse(diag.Contains("v1.1.0"), "Diagnostics should not contain stale hardcoded v1.1.0");
+            Assert.IsTrue(diag.Contains(McpServer.RegisteredToolCount + " MCP Tools Available"), "Diagnostics should contain dynamic registered tool count");
+            Assert.IsFalse(diag.Contains("30 MCP Tools Available"), "Diagnostics should not contain stale hardcoded 30 tool count");
+        }
+
+        [TestMethod]
+        public void TestResolveSessionLogPathWithDefaultAndEnvVar()
+        {
+            // Test 1: Env var override
+            string customPath = @"C:\custom\test\mcp_session.log";
+            Environment.SetEnvironmentVariable("CODESYS_MCP_LOG_FILE", customPath);
+            try
+            {
+                string resolved = CodesysIdeUiHelper.ResolveSessionLogPath();
+                Assert.AreEqual(customPath, resolved);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("CODESYS_MCP_LOG_FILE", null);
+            }
+
+            // Test 2: Standard user profile path
+            string defaultResolved = CodesysIdeUiHelper.ResolveSessionLogPath();
+            Assert.IsNotNull(defaultResolved);
+            Assert.IsTrue(defaultResolved.EndsWith("session_debug.log", StringComparison.OrdinalIgnoreCase));
+            string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrEmpty(userHome))
+            {
+                string expectedDir = System.IO.Path.Combine(userHome, ".codesys-mcp-plugin");
+                Assert.IsTrue(defaultResolved.StartsWith(expectedDir, StringComparison.OrdinalIgnoreCase) || System.IO.File.Exists(defaultResolved));
+            }
+        }
+
+        [TestMethod]
+        public void TestServerBootstrapStartupBannerContainsVersionAndToolCount()
+        {
+            string banner = ServerBootstrap.BuildStartupBanner("codesys_mcp_pipe");
+            Assert.IsNotNull(banner);
+            Assert.IsTrue(banner.Contains("v" + CodesysIdeUiHelper.GetServerVersion()), "Banner must contain dynamic version");
+            Assert.IsTrue(banner.Contains(McpServer.RegisteredToolCount + " Tools Available"), "Banner must contain live tool count");
+            Assert.IsFalse(banner.Contains("v1.1.0"), "Banner must not contain stale v1.1.0");
+        }
     }
 }
