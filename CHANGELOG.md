@@ -2,6 +2,42 @@
 
 All notable changes to the `codesys-mcp-plugin` (CODESYS Native C# Stdio MCP Server) project will be documented in this file.
 
+## [1.2.4] - 2026-11-08
+
+### Added
+- **Device Authentication & Headless Logon Safety**:
+  - Implemented 3-layer protection against SoftPLC / device modal login dialogs (`#32770`).
+  - Layer 1: Proactive default credentials (`admin`/`1111`) injected via `online.set_default_credentials` in IronPython bootstrap and C# `CodesysOnlineHelper.PlcLogin`.
+  - Layer 2: Support for `username`/`password` parameters in `plc_login` and `CODESYS_DEVICE_USER`/`CODESYS_DEVICE_PASSWORD` environment variables.
+  - Layer 3: Native Win32 background watchdog (`DeviceLogonWatchdog`) scanning primary UI thread to auto-fill or dismiss unexpected modal dialogs within 1 second, preventing UI deadlocks.
+
+## [1.2.3] - 2026-11-07
+
+### Added
+- **Unified Session Log Synchronization**:
+  - Mirrored all C# in-process MCP request, tool execution, PLC operation, and error logs directly to `~/.codesys-mcp-plugin/session_debug.log` with 10MB auto-rollover protection.
+- **Diagnostics Card UX**:
+  - Fixed Close button on "CODESYS MCP Server Diagnostics" card form and bound `Escape` key shortcut.
+
+## [1.2.2] - 2026-11-06
+
+### Added
+- **IDE Message Categories & Multi-channel Sensing**:
+  - Added `get_message_categories` to discover registered message categories in CODESYS IDE (Build, Scripting, etc.).
+  - Added `get_ide_messages` for category-specific message filtering.
+
+## [1.2.0] - 2026-11-05
+
+### Added
+- **Online PLC Control & Variable Suite**:
+  - Added tools for online operations: `plc_login`, `plc_logout`, `plc_control`, `get_online_status`, `inspect_online`.
+  - Added variable read/write tools: `read_variables`, `write_variable`, `batch_write_variables`, `unforce_variables`, `read_struct`, `write_struct`, `read_array`.
+  - Added real-time trace support: `add_trace_variable`, `get_trace_info`, `analyze_trace`.
+  - Added diagnostics and logging tools: `setup_plc_logger`, `read_plc_logs`, `setup_device_logger`, `read_device_log`, `inject_code_log`.
+  - Added permanent IDE status indicator and diagnostics card (`get_ui_indicator_status`).
+
+---
+
 ## [1.1.0] - 2026-10-27
 
 ### Added

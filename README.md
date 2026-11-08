@@ -105,14 +105,18 @@ If you already have a CODESYS project open:
 
 ## 🔌 Client Configuration (Claude Desktop / Cursor / Windsurf)
 
-Add the following to your MCP client configuration (e.g., `claude_desktop_config.json` or `.cursor/mcp.json`):
+Add the following to your MCP client configuration (e.g., `claude_desktop_config.json` or `.cursor/mcp.json`). You can optionally specify environment variables for device authentication:
 
 ```json
 {
   "mcpServers": {
     "codesys": {
-      "command": "C:\\Users\\vboxuser\\Desktop\\Repos\\codesys-mcp-plugin\\bin\\Release\\CodesysMcpCli.exe",
-      "args": []
+      "command": "C:\\path\\to\\codesys-mcp-plugin\\bin\\Release\\CodesysMcpCli.exe",
+      "args": [],
+      "env": {
+        "CODESYS_DEVICE_USER": "admin",
+        "CODESYS_DEVICE_PASSWORD": "1111"
+      }
     }
   }
 }
@@ -120,23 +124,130 @@ Add the following to your MCP client configuration (e.g., `claude_desktop_config
 
 ---
 
-## 🛠️ Supported MCP Tools (`tools/list`)
+## 🔐 Device Authentication & Headless Logon Safety
 
+CODESYS Control runtimes (e.g., SoftPLC `CODESYS Control Win V3 x64`) typically enforce device user management. Unauthenticated login attempts trigger an interactive Win32 modal dialog (`#32770`), causing automated test harnesses or AI agents to hang indefinitely.
+
+This plugin incorporates a **three-tier safety architecture** providing silent, sub-2s automated logins with zero deadlocks:
+
+### 1. Default Credentials & Zero-Interaction Login
+* **Default Credentials**: SoftPLC default administrator credentials are username **`admin`** and password **`1111`**.
+* **Protocol-Level Handshake**: When `plc_login` is invoked, the plugin injects credentials via `online.set_default_credentials(user, pass)` at the communication layer before dispatching the login request. This suppresses modal logon dialogs at the source.
+
+### 2. Custom Credential Configuration (Three Precedence Levels)
+
+1. **Tier 1: Explicit MCP Tool Arguments (Highest Precedence)**
+   AI clients or test runners can pass credentials directly into `plc_login`:
+   ```json
+   {
+     "name": "plc_login",
+     "arguments": {
+       "application": "Application",
+       "username": "custom_user",
+       "password": "custom_password"
+     }
+   }
+   ```
+2. **Tier 2: Environment Variables in MCP Client Config (Recommended)**
+   Set environment variables within your client MCP configuration file:
+   * `CODESYS_DEVICE_USER`: Device username
+   * `CODESYS_DEVICE_PASSWORD`: Device password
+3. **Tier 3: System Environment Variables**
+   Set `CODESYS_DEVICE_USER` and `CODESYS_DEVICE_PASSWORD` in the operating system environment.
+
+### 3. Native Win32 Watchdog (`DeviceLogonWatchdog`)
+* The plugin runs a background `DeviceLogonWatchdog` scanning the primary UI thread message loop during login execution.
+* If an unexpected Win32 modal dialog appears, the watchdog auto-fills credentials; if unhandled, it dispatches `IDCANCEL` within 1 second, **completely eliminating 30-second UI freezes and thread deadlocks**.
+
+---
+
+## ⚙️ Environment Variables & Configuration
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `CODESYS_DEVICE_USER` | `admin` | Default username for SoftPLC / target device authentication |
+| `CODESYS_DEVICE_PASSWORD` | `1111` | Default password for SoftPLC / target device authentication |
+| `CODESYS_MCP_LOG_FILE` | `~/.codesys-mcp-plugin/session_debug.log` | Unified runtime log path (with automatic 10MB rollover) |
+| `CODESYS_MCP_PIPE` | `codesys_mcp_pipe` | Windows Named Pipe identifier (`\\.\pipe\codesys_mcp_pipe`) |
+| `CODESYS_MCP_PROJECT` | None | Absolute path to a `.project` file to open automatically on startup |
+
+---
+
+## 🛠️ Supported MCP Tools (42 Tools)
+
+### 1. Project Management & Navigation
 | Tool Name | Arguments | Description |
 | :--- | :--- | :--- |
-| `get_project_info` | None | Returns active project name, file path, dirty status (`isDirty`), and active application. |
 | `open_project` | `path: string` | Opens an existing `.project` file in CODESYS. |
 | `close_project` | None | Closes the currently active project. |
 | `save_project` | None | Saves all modifications in the current project. |
-| `get_project_tree` | `full?: bool` | Recursively retrieves the project tree (POUs, GVLs, DUTs, devices, tasks). |
+| `get_project_info` | None | Returns active project name, file path, dirty status (`isDirty`), and active application. |
+| `get_project_tree` | `full?: bool` | Recursively retrieves the project tree (devices, apps, POUs, GVLs, tasks). |
+| `create_folder` | `name: string`, `parent?: string` | Creates an organizational folder within the project. |
+| `create_interface` | `name: string`, `folder?: string` | Creates a new IEC interface (`ITF`). |
+| `create_method` | `pou: string`, `name: string`, `return_type?: string` | Creates a new method (`METHOD`) under a POU or FB. |
+| `create_property` | `pou: string`, `name: string`, `type?: string` | Creates a new property (`PROPERTY`) under a POU or FB. |
+| `create_boot_application` | `application?: string` | Generates a boot application on the target controller. |
+
+### 2. Code Editing, Search & Snapshot Rollback
+| Tool Name | Arguments | Description |
+| :--- | :--- | :--- |
 | `read_pou` | `name: string` | Reads the declaration (`VAR...END_VAR`) and implementation (`ST`) of a POU. |
 | `write_pou` | `name`, `declaration`, `implementation`, `type` | Creates or updates a POU (`Program`, `FunctionBlock`, or `Function`). |
 | `delete_pou` | `name: string` | Deletes a POU or object from the project. |
+| `search_code` | `query: string`, `is_regex?: bool`, `scope?: string` | Searches plain text or regex across all POUs, GVLs, and DUTs with line numbers and context. |
+| `get_diff` | `name?: string`, `section?: string` | Generates standard Unified Diff showing modifications made during the current session. |
+| `preview_diff` | `name: string`, `declaration?: string`, `implementation?: string` | Previews changes as a unified diff before applying writes. |
+| `rollback_pou` | `name: string` | Safely rolls back a POU to its session baseline snapshot, or deletes it if newly created. |
+
+### 3. Compilation & IDE Message Sensing
+| Tool Name | Arguments | Description |
+| :--- | :--- | :--- |
 | `compile_project` | `clean?: bool`, `rebuild?: bool` | Triggers project compilation and returns structured error/warning messages. |
 | `get_compiler_messages` | None | Retrieves compiler errors and warnings without triggering a rebuild. |
-| `search_code` | `query: string`, `is_regex?: bool`, `case_sensitive?: bool`, `scope?: string`, `max_results?: int` | Searches plain text or regex across all POUs, GVLs, and DUTs with exact line numbers and context. |
-| `get_diff` | `name?: string`, `section?: string` | Generates standard Unified Diff showing modifications made during the current session. |
-| `rollback_pou` | `name: string` | Safely rolls back a POU to its session baseline snapshot, or deletes it if newly created. |
+| `get_message_categories` | None | Lists all registered message categories in the CODESYS IDE (e.g., Build, Scripting). |
+| `get_ide_messages` | `category?: string`, `max_count?: int` | Retrieves IDE messages across specific channels. |
+
+### 4. Online Connection & PLC Control
+| Tool Name | Arguments | Description |
+| :--- | :--- | :--- |
+| `plc_login` | `application?: string`, `username?: string`, `password?: string` | Connects to SoftPLC / device with auto-authentication and watchdog defense. |
+| `plc_logout` | `application?: string` | Disconnects online session from the PLC. |
+| `plc_control` | `command: string` (`start` / `stop` / `reset_cold` / `reset_warm` / `reset_origin`) | Controls PLC execution state. |
+| `get_online_status` | `application?: string` | Queries online connection state, application state, and operating state. |
+| `inspect_online` | `application?: string` | Inspects online environment details and topology. |
+
+### 5. Variable I/O, Batch Writes, Structs & Arrays
+| Tool Name | Arguments | Description |
+| :--- | :--- | :--- |
+| `read_variables` | `names: string[]`, `application?: string` | Reads current online values and quality for scalar variables. |
+| `write_variable` | `name: string`, `value: string`, `force?: bool` | Writes variable values or forces values online. |
+| `batch_write_variables` | `variables: object` | Atomically writes multiple variables in a single batch. |
+| `unforce_variables` | `names: string[]` | Unforces active variable overrides. |
+| `read_struct` | `name: string`, `application?: string` | Reads all field members and live values of a complex DUT struct. |
+| `write_struct` | `name: string`, `values: object` | Sets multiple member fields within a struct. |
+| `read_array` | `name: string`, `start_index?: int`, `count?: int` | Reads slice of array elements. |
+
+### 6. Real-time Trace Engine
+| Tool Name | Arguments | Description |
+| :--- | :--- | :--- |
+| `add_trace_variable` | `variable: string`, `task?: string` | Adds a variable to the active trace configuration. |
+| `get_trace_info` | `trace_name?: string` | Retrieves trace buffer status, sample count, and timestamps. |
+| `analyze_trace` | `trace_name?: string`, `metrics?: string[]` | Analyzes trace data (min/max, settling time, rate of change). |
+
+### 7. Logging & Diagnostics
+| Tool Name | Arguments | Description |
+| :--- | :--- | :--- |
+| `setup_plc_logger` | `application?: string`, `buffer_size?: int` | Configures in-memory cyclic PLC runtime logger. |
+| `read_plc_logs` | `application?: string`, `max_entries?: int` | Reads runtime log records from PLC memory. |
+| `setup_device_logger` | `device?: string` | Attaches diagnostic logger to target device. |
+| `read_device_log` | `device?: string`, `max_entries?: int` | Retrieves hardware and firmware diagnostic logs. |
+| `inject_code_log` | `pou: string`, `line: int`, `message: string` | Injects non-intrusive trace logs into source code. |
+
+### 8. IDE UI Indicator & Diagnostics Card
+| Tool Name | Arguments | Description |
+| :--- | :--- | :--- |
+| `get_ui_indicator_status` | None | Returns CODESYS status strip indicator status, heartbeat, total requests, and diagnostics card state. |
 
 ---
 

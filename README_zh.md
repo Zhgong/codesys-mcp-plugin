@@ -106,14 +106,18 @@ codesys-mcp-plugin/
 
 ## 🔌 配置 AI 客户端（纯 Stdio 模式，无需任何 HTTP Server）
 
-无论你使用的是 **Claude Desktop**、**Cursor**、**Windsurf** 还是其他 MCP 客户端，全部统一通过 **Stdio** 调用 `CodesysMcpCli.exe`，无需开启任何端口：
+无论你使用的是 **Claude Desktop**、**Cursor**、**Windsurf** 还是其他 MCP 客户端，全部统一通过 **Stdio** 调用 `CodesysMcpCli.exe`，无需开启任何端口。
 
 ```json
 {
   "mcpServers": {
     "codesys": {
-      "command": "C:\\Users\\vboxuser\\Desktop\\Repos\\codesys-mcp-plugin\\bin\\Release\\CodesysMcpCli.exe",
-      "args": []
+      "command": "C:\\path\\to\\codesys-mcp-plugin\\bin\\Release\\CodesysMcpCli.exe",
+      "args": [],
+      "env": {
+        "CODESYS_DEVICE_USER": "admin",
+        "CODESYS_DEVICE_PASSWORD": "1111"
+      }
     }
   }
 }
@@ -121,23 +125,130 @@ codesys-mcp-plugin/
 
 ---
 
-## 🛠️ 支持的 MCP 工具列表 (`tools/list`)
+## 🔐 设备在线鉴权与无人值守安全机制
 
+CODESYS Control（如 SoftPLC `CODESYS Control Win V3 x64`）通常启用了设备用户权限管理。在未鉴权状态下连接时，底层会触发 Win32 模态登录弹窗（`#32770`），导致自动化测试与 AI 客户端在无界面或无人值守时挂起卡死。
+
+本插件内置了 **三重防御安全机制**，彻底根除模态弹窗死锁，实现零干预、秒级静默登录：
+
+### 1. 默认凭据与零干预秒级登录
+* **默认账号密码**：SoftPLC 默认管理员凭据为用户名 **`admin`**，密码 **`1111`**。
+* **源头握手鉴权**：在调用 `plc_login` 时，插件自动在通信底层执行 `online.set_default_credentials(user, pass)`，从源头抑制模态登录对话框弹出，连接耗时通常控制在 2 秒以内。
+
+### 2. 自定义设备凭据的三种配置方式（按优先级排序）
+
+1. **方式一：MCP 工具显式传参（最高优先级）**
+   AI 客户端在调用 `plc_login` 时可直接传入指定的用户名和密码：
+   ```json
+   {
+     "name": "plc_login",
+     "arguments": {
+       "application": "Application",
+       "username": "your_user",
+       "password": "your_password"
+     }
+   }
+   ```
+2. **方式二：AI 客户端配置中注入环境变量（推荐，最省心）**
+   在 `claude_desktop_config.json` 或各客户端的 MCP 设置中配置 `env`：
+   * `CODESYS_DEVICE_USER`: 目标设备用户名
+   * `CODESYS_DEVICE_PASSWORD`: 目标设备密码
+3. **方式三：操作系统全局/用户环境变量**
+   在 Windows 系统环境变量或启动脚本中配置 `CODESYS_DEVICE_USER` 与 `CODESYS_DEVICE_PASSWORD`。
+
+### 3. 原生 Win32 看门狗守护（Watchdog）
+* 插件内置后台 `DeviceLogonWatchdog`，在登录执行期间主动监测主 UI 线程的所有模态弹窗。
+* 若遭遇未预期的设备登录对话框，看门狗会尝试自动填充凭据并确认；若匹配失败则在 1 秒内自动发送 `IDCANCEL` 取消弹窗并向客户端报告错误，**彻底杜绝 UI 线程死锁 30 秒超时**。
+
+---
+
+## ⚙️ 常用环境变量与高级配置
+
+| 环境变量 | 默认值 | 说明 |
+| :--- | :--- | :--- |
+| `CODESYS_DEVICE_USER` | `admin` | SoftPLC / 目标设备默认登录用户名 |
+| `CODESYS_DEVICE_PASSWORD` | `1111` | SoftPLC / 目标设备默认登录密码 |
+| `CODESYS_MCP_LOG_FILE` | `~/.codesys-mcp-plugin/session_debug.log` | 插件运行时统一会话日志路径（自动 10MB 滚动防护） |
+| `CODESYS_MCP_PIPE` | `codesys_mcp_pipe` | Windows 命名管道名称（默认 `\\.\pipe\codesys_mcp_pipe`） |
+| `CODESYS_MCP_PROJECT` | 无 | 启动 CODESYS 时默认自动加载打开的 `.project` 绝对路径 |
+
+---
+
+## 🛠️ 支持的 MCP 工具列表（共 42 项）
+
+### 1. 工程管理与导航
 | 工具名称 | 参数说明 | 功能描述 |
 | :--- | :--- | :--- |
-| `get_project_info` | 无 | 获取当前打开工程的名称、路径、修改状态 (`isDirty`)、活动应用名称 |
-| `open_project` | `path: string` | 在 CODESYS 中打开指定的 `.project` 工程文件 |
+| `open_project` | `path: string` | 打开指定的 `.project` 工程文件 |
 | `close_project` | 无 | 关闭当前打开的工程 |
 | `save_project` | 无 | 保存当前打开的工程 |
-| `get_project_tree` | `full?: bool` | 递归获取工程对象树（所有设备、应用、POU、GVL、任务及是否有声明/实现代码） |
+| `get_project_info` | 无 | 获取当前工程名称、路径、修改状态 (`isDirty`)、活动应用名称 |
+| `get_project_tree` | `full?: bool` | 递归获取工程对象树（设备、应用、POU、GVL、任务结构） |
+| `create_folder` | `name: string`, `parent?: string` | 创建工程组织目录文件夹 |
+| `create_interface` | `name: string`, `folder?: string` | 创建 IEC 接口对象 (`ITF`) |
+| `create_method` | `pou: string`, `name: string`, `return_type?: string` | 为指定的 POU / FB 创建方法 (`METHOD`) |
+| `create_property` | `pou: string`, `name: string`, `type?: string` | 为指定的 POU / FB 创建属性 (`PROPERTY`) |
+| `create_boot_application` | `application?: string` | 在控制器中生成 Boot 启动引导应用 |
+
+### 2. 代码读写、搜索与快照回滚
+| 工具名称 | 参数说明 | 功能描述 |
+| :--- | :--- | :--- |
 | `read_pou` | `name: string` | 读取指定 POU 的声明区 (`VAR...END_VAR`) 和实现区 (`ST` 代码) |
-| `write_pou` | `name`, `declaration`, `implementation`, `type` | 创建新 POU 或更新已有 POU 的声明区和实现区代码（支持 `Program`、`FunctionBlock`、`Function`） |
-| `delete_pou` | `name: string` | 从工程中删除指定的 POU 对象 |
+| `write_pou` | `name`, `declaration`, `implementation`, `type` | 创建新 POU 或更新已有 POU 的声明区和实现区代码 |
+| `delete_pou` | `name: string` | 从工程中安全删除指定的 POU 对象 |
+| `search_code` | `query: string`, `is_regex?: bool`, `scope?: string` | 全局搜索普通文本或正则表达式，精准返回 1-based 行号及上下文 |
+| `get_diff` | `name?: string`, `section?: string` | 生成当前会话中对 POU 改动的标准 Unified Diff 对比报告 |
+| `preview_diff` | `name: string`, `declaration?: string`, `implementation?: string` | 预估写入代码后的 Diff 差异，而不实际修改工程 |
+| `rollback_pou` | `name: string` | 一键将 POU 安全回滚至会话基线快照（新增 POU 则安全删除） |
+
+### 3. 编译诊断与 IDE 消息感知
+| 工具名称 | 参数说明 | 功能描述 |
+| :--- | :--- | :--- |
 | `compile_project` | `clean?: bool`, `rebuild?: bool` | 编译当前工程并直接返回所有编译报错、警告明细 |
-| `get_compiler_messages` | 无 | 不重新触发编译，直接读取当前编译器消息列表 |
-| `search_code` | `query: string`, `is_regex?: bool`, `case_sensitive?: bool`, `scope?: string`, `max_results?: int` | 跨 POU、GVL、DUT 全局搜索普通文本或正则表达式，精准返回 1-based 行号及上下文 |
-| `get_diff` | `name?: string`, `section?: string` | 生成当前会话中对 POU 改动的标准 Unified Diff（类似 git diff）对比报告 |
-| `rollback_pou` | `name: string` | 一键将 POU 安全回滚至会话基线快照（若为会话中新创建的 POU 则安全删除） |
+| `get_compiler_messages` | 无 | 读取当前编译器的错误和警告列表 |
+| `get_message_categories` | 无 | 获取 CODESYS IDE 注册的消息分类通道（如 Build, Scripting 等） |
+| `get_ide_messages` | `category?: string`, `max_count?: int` | 跨通道检索 IDE 消息日志 |
+
+### 4. PLC 在线连接与运行控制
+| 工具名称 | 参数说明 | 功能描述 |
+| :--- | :--- | :--- |
+| `plc_login` | `application?: string`, `username?: string`, `password?: string` | 在线连接 SoftPLC/设备（支持自动鉴权与防弹窗看门狗） |
+| `plc_logout` | `application?: string` | 断开 PLC 在线连接 |
+| `plc_control` | `command: string` (`start` / `stop` / `reset_cold` / `reset_warm` / `reset_origin`) | 控制 PLC 运行状态（启动、停止、复位） |
+| `get_online_status` | `application?: string` | 查询 PLC 在线连接状态、应用运行状态与操作状态 |
+| `inspect_online` | `application?: string` | 深度巡检在线环境与设备拓扑 |
+
+### 5. 变量实时读写、批量写入与复合结构
+| 工具名称 | 参数说明 | 功能描述 |
+| :--- | :--- | :--- |
+| `read_variables` | `names: string[]`, `application?: string` | 读取标量变量当前在线数值与质量状态 |
+| `write_variable` | `name: string`, `value: string`, `force?: bool` | 写入单个变量数值或执行在线强制 (Force) |
+| `batch_write_variables` | `variables: object` | 原子性批量写入多个变量 |
+| `unforce_variables` | `names: string[]` | 解除变量的在线强制状态 |
+| `read_struct` | `name: string`, `application?: string` | 读取复杂结构体 (DUT) 的所有成员字段与在线数值 |
+| `write_struct` | `name: string`, `values: object` | 批量向结构体各成员赋值 |
+| `read_array` | `name: string`, `start_index?: int`, `count?: int` | 读取数组区间内的元素在线数值 |
+
+### 6. 实时 Trace 示波器
+| 工具名称 | 参数说明 | 功能描述 |
+| :--- | :--- | :--- |
+| `add_trace_variable` | `variable: string`, `task?: string` | 向 Trace 示波器添加采样监测变量 |
+| `get_trace_info` | `trace_name?: string` | 获取当前 Trace 状态、已记录样本数与时间戳 |
+| `analyze_trace` | `trace_name?: string`, `metrics?: string[]` | 分析 Trace 采样数据（极值、变化率、稳态时间） |
+
+### 7. 日志系统集成
+| 工具名称 | 参数说明 | 功能描述 |
+| :--- | :--- | :--- |
+| `setup_plc_logger` | `application?: string`, `buffer_size?: int` | 初始化 PLC 运行时内存环形日志记录器 |
+| `read_plc_logs` | `application?: string`, `max_entries?: int` | 读取 PLC 运行日志条目 |
+| `setup_device_logger` | `device?: string` | 挂载目标设备硬件诊断日志 |
+| `read_device_log` | `device?: string`, `max_entries?: int` | 读取设备系统级硬件/固件日志 |
+| `inject_code_log` | `pou: string`, `line: int`, `message: string` | 在指定代码位置安全注入调试跟踪日志 |
+
+### 8. IDE 状态栏与诊断卡
+| 工具名称 | 参数说明 | 功能描述 |
+| :--- | :--- | :--- |
+| `get_ui_indicator_status` | 无 | 获取 CODESYS 状态栏指示灯、心跳、请求总数与诊断卡状态 |
 
 ---
 
