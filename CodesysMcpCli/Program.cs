@@ -5,10 +5,11 @@ using System.IO.Pipes;
 using System.Reflection;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 [assembly: AssemblyTitle("CodesysMcpCli")]
-[assembly: AssemblyVersion("1.2.4.0")]
-[assembly: AssemblyFileVersion("1.2.4.0")]
+[assembly: AssemblyVersion("1.2.5.0")]
+[assembly: AssemblyFileVersion("1.2.5.0")]
 
 namespace CodesysMcpCli
 {
@@ -58,22 +59,18 @@ namespace CodesysMcpCli
             try
             {
                 using (pipeClient)
+                using (var cts = new CancellationTokenSource())
                 {
-                    string inputLine;
-                    while ((inputLine = Console.ReadLine()) != null)
+                    Task stdinTask = RunStdinToPipeAsync(pipeClient, cts.Token);
+                    Task pipeTask = PumpPipeToStdoutAsync(pipeClient, cts.Token);
+
+                    Task completed = Task.WhenAny(stdinTask, pipeTask).GetAwaiter().GetResult();
+                    cts.Cancel();
+
+                    // Propagate unexpected pipe errors if the completed task faulted
+                    if (completed.IsFaulted && completed.Exception != null)
                     {
-                        if (string.IsNullOrWhiteSpace(inputLine)) continue;
-
-                        // Forward request line to CODESYS pipe
-                        WriteLineToPipe(pipeClient, inputLine);
-
-                        // Read response line from CODESYS pipe
-                        string responseLine = ReadLineFromPipe(pipeClient);
-                        if (responseLine != null)
-                        {
-                            Console.WriteLine(responseLine);
-                            Console.Out.Flush();
-                        }
+                        throw completed.Exception.GetBaseException();
                     }
                 }
             }
@@ -84,6 +81,89 @@ namespace CodesysMcpCli
             }
 
             return 0;
+        }
+
+        private static Task RunStdinToPipeAsync(NamedPipeClientStream pipeClient, CancellationToken token)
+        {
+            var tcs = new TaskCompletionSource<object>();
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    string inputLine;
+                    while (!token.IsCancellationRequested && (inputLine = Console.ReadLine()) != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(inputLine)) continue;
+                        byte[] bytes = Encoding.UTF8.GetBytes(inputLine + "\n");
+                        pipeClient.WriteAsync(bytes, 0, bytes.Length, token).GetAwaiter().GetResult();
+                        pipeClient.Flush();
+                    }
+                    tcs.TrySetResult(null);
+                }
+                catch (OperationCanceledException)
+                {
+                    tcs.TrySetResult(null);
+                }
+                catch (ObjectDisposedException)
+                {
+                    tcs.TrySetResult(null);
+                }
+                catch (IOException)
+                {
+                    tcs.TrySetResult(null);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            });
+            thread.IsBackground = true;
+            thread.Start();
+            return tcs.Task;
+        }
+
+        private static async Task PumpPipeToStdoutAsync(NamedPipeClientStream pipeClient, CancellationToken token)
+        {
+            byte[] buffer = new byte[4096];
+            var lineBytes = new List<byte>();
+
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    int bytesRead = await pipeClient.ReadAsync(buffer, 0, buffer.Length, token).ConfigureAwait(false);
+                    if (bytesRead == 0)
+                    {
+                        // Flush any trailing partial line before exiting on pipe EOF
+                        if (lineBytes.Count > 0)
+                        {
+                            string tail = Encoding.UTF8.GetString(lineBytes.ToArray());
+                            Console.WriteLine(tail);
+                            Console.Out.Flush();
+                            lineBytes.Clear();
+                        }
+                        break;
+                    }
+
+                    for (int i = 0; i < bytesRead; i++)
+                    {
+                        byte b = buffer[i];
+                        if (b == (byte)'\n')
+                        {
+                            string line = Encoding.UTF8.GetString(lineBytes.ToArray());
+                            lineBytes.Clear();
+                            Console.WriteLine(line);
+                            Console.Out.Flush();
+                        }
+                        else if (b != (byte)'\r')
+                        {
+                            lineBytes.Add(b);
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
         }
 
         private static string ResolvePipeName(string[] args)
@@ -133,7 +213,7 @@ namespace CodesysMcpCli
             {
                 try
                 {
-                    var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+                    var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
                     client.Connect(1000);
                     return client;
                 }

@@ -127,19 +127,23 @@ Set-Content -Path $tempNotesFile -Value $notesContent -Encoding UTF8
 Write-Host "Extracted notes preview:" -ForegroundColor DarkGray
 Write-Host ($notesContent | Out-String).Trim() -ForegroundColor DarkGray
 
-# 6. Ensure Git Tag exists locally and on remote
-Write-Host "`n[Step 4/5] Checking Git Tag $Tag..." -ForegroundColor Green
-$existingTags = git -C $Root tag -l $Tag
-if (-not $existingTags) {
-    Write-Host "Creating local tag: $Tag" -ForegroundColor Yellow
-    git -C $Root tag -a $Tag -m "Release $Tag"
-}
-
-$remoteName = if ($Target -eq "Public") { "public" } else { "origin" }
-Write-Host "Pushing tag $Tag to $remoteName..." -ForegroundColor Green
-git -C $Root push $remoteName $Tag --force
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Could not push tag directly to $remoteName (or already up to date)."
+# 6. Tagging and Target branch handling
+if ($Target -eq "Public") {
+    Write-Host "`n[Step 4/5] Preparing public release target (master)..." -ForegroundColor Green
+    $targetBranch = "master"
+} else {
+    Write-Host "`n[Step 4/5] Checking Git Tag $Tag on origin..." -ForegroundColor Green
+    $existingTags = git -C $Root tag -l $Tag
+    if (-not $existingTags) {
+        Write-Host "Creating local tag: $Tag" -ForegroundColor Yellow
+        git -C $Root tag -a $Tag -m "Release $Tag"
+    }
+    Write-Host "Pushing tag $Tag to origin..." -ForegroundColor Green
+    git -C $Root push origin $Tag --force
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Could not push tag directly to origin (or already up to date)."
+    }
+    $targetBranch = ""
 }
 
 # 7. Create GitHub Release via gh CLI
@@ -151,6 +155,10 @@ $ghArgs = @(
     "--title", $Title,
     "--notes-file", $tempNotesFile
 )
+
+if (-not [string]::IsNullOrWhiteSpace($targetBranch)) {
+    $ghArgs += @("--target", $targetBranch)
+}
 
 if ($IsPreRelease) {
     $ghArgs += "--prerelease"
