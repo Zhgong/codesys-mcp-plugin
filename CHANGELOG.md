@@ -2,6 +2,13 @@
 
 All notable changes to the `codesys-mcp-plugin` (CODESYS Native C# Stdio MCP Server) project will be documented in this file.
 
+## [1.2.5] - 2026-11-12
+
+### Fixed
+- **MCP Protocol & CLI Full-Duplex Bridge (`CodesysMcpCli` & `McpServer`)**:
+  - Replaced the synchronous 1-in-1-out Named Pipe loop in `CodesysMcpCli` with a full-duplex asynchronous bridge (`PipeOptions.Asynchronous`, concurrent `stdin -> pipe` and `pipe -> stdout` pumps), eliminating handshake deadlocks on JSON-RPC 2.0 notifications (such as `notifications/initialized` and `notifications/cancelled` in OpenCode).
+  - Updated `McpServer.ProcessJsonRpc` to strictly comply with JSON-RPC 2.0 §4.1 by returning `null` (no response) for any notification without an `"id"`, preventing `-32601 Method not found` responses from desynchronizing the pipe.
+
 ## [1.2.4] - 2026-11-08
 
 ### Added

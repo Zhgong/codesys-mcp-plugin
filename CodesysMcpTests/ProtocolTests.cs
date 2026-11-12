@@ -64,6 +64,20 @@ namespace CodesysMcpTests
         }
 
         [TestMethod]
+        public void TestUnknownNotificationWithoutIdReturnsNull()
+        {
+            object res = _server.ProcessJsonRpc("{\"jsonrpc\": \"2.0\", \"method\": \"notifications/cancelled\", \"params\": {\"id\": \"req-1\"}}");
+            Assert.IsNull(res, "Any JSON-RPC 2.0 notification without id must return null");
+        }
+
+        [TestMethod]
+        public void TestCustomNotificationWithoutIdReturnsNull()
+        {
+            object res = _server.ProcessJsonRpc("{\"jsonrpc\": \"2.0\", \"method\": \"custom/event\"}");
+            Assert.IsNull(res, "Custom notification without id must return null");
+        }
+
+        [TestMethod]
         public void TestPingReturnsEmptyResult()
         {
             var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 42, \"method\": \"ping\"}");

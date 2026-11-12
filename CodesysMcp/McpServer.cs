@@ -335,7 +335,8 @@ namespace CodesysMcp
 
 
 
-            object id = req.ContainsKey("id") ? req["id"] : null;
+            bool hasId = req.ContainsKey("id");
+            object id = hasId ? req["id"] : null;
 
             string method = req.ContainsKey("method") ? req["method"]?.ToString() : null;
 
@@ -362,6 +363,8 @@ namespace CodesysMcp
             }
 
 
+
+            bool isNotification = !hasId || (id == null && method.StartsWith("notifications/", StringComparison.Ordinal));
 
             if (method == "notifications/initialized")
 
@@ -546,6 +549,16 @@ namespace CodesysMcp
                     };
 
                 }
+
+            }
+
+
+
+            if (isNotification)
+
+            {
+
+                return null;
 
             }
 
