@@ -56,6 +56,20 @@ try:
             os.makedirs(SHADOW_DIR)
         except:
             pass
+    else:
+        try:
+            old_shadows = sorted(
+                [os.path.join(SHADOW_DIR, f) for f in os.listdir(SHADOW_DIR) if f.startswith("CodesysMcp_") and f.endswith(".dll")],
+                key=lambda p: os.path.getmtime(p),
+                reverse=True
+            )
+            for stale in old_shadows[3:]:
+                try:
+                    os.remove(stale)
+                except:
+                    pass
+        except:
+            pass
 
     SHADOW_DLL = os.path.join(SHADOW_DIR, "CodesysMcp_%d.dll" % int(time.time() * 1000))
     try:
@@ -88,7 +102,8 @@ try:
     import System
     import System.Reflection
     asm = System.Reflection.Assembly.LoadFrom(LOAD_PATH)
-    server_version = asm.GetName().Version.ToString(3)
+    asm_ver = asm.GetName().Version
+    server_version = asm_ver.ToString(4) if asm_ver.Revision > 0 else asm_ver.ToString(3)
     tool_count = 36
     try:
         mcp_server_type = asm.GetType("CodesysMcp.McpServer")
@@ -151,9 +166,12 @@ try:
         log("GUI mode active: Exiting bootstrap script immediately so CODESYS IDE remains 100% unlocked!")
     else:
         log("Headless (--noUI) mode active: Entering primary thread queue loop...")
+        ctx_type = asm.GetType("CodesysMcp.CodesysContext")
+        process_queue_method = ctx_type.GetMethod("ProcessQueue")
+        queue_args = System.Array[System.Object]([20])
         while True:
             try:
-                CodesysMcp.CodesysContext.ProcessQueue(20)
+                process_queue_method.Invoke(None, queue_args)
                 system.delay(50)
             except Exception:
                 time.sleep(0.05)

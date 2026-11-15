@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Web.Script.Serialization;
@@ -185,7 +185,7 @@ namespace CodesysMcpTests
             Assert.IsNotNull(result);
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools);
-            Assert.AreEqual(42, tools.Count);
+            Assert.AreEqual(43, tools.Count);
 
             var names = new List<string>();
             foreach (Dictionary<string, object> t in tools)

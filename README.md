@@ -18,15 +18,15 @@ flowchart LR
         AI["Claude Desktop / Cursor"]
     end
 
-    subgraph Bridge["Lightweight CLI Proxy"]
-        CLI["CodesysMcpCli.exe\n(stdin / stdout)"]
+    subgraph Bridge["Lightweight CLI Proxy (Full-Duplex)"]
+        CLI["CodesysMcpCli.exe\n(stdin/stdout, Heartbeat &\nAuto-Reconnect)"]
     end
 
     subgraph CODESYS["CODESYS Process (In-Memory)"]
         Pipe["Named Pipe\n\\\\.\\pipe\\codesys_mcp_pipe"]
         Core["CodesysMcp.dll\n(In-Process C# MCP Server)"]
-        UI["UI Thread Dispatch\n(SynchronizationContext)"]
-        Engine["CODESYS ScriptEngine\n(Projects, POUs, Compiler)"]
+        UI["UI Thread Dispatch & Editor Buffers\n(SynchronizationContext)"]
+        Engine["CODESYS ScriptEngine &\nOne-Way .st Mirror (.cds_mcp/src)"]
         
         Pipe --> Core
         Core --> UI
@@ -34,19 +34,21 @@ flowchart LR
     end
 
     AI <-->|Stdio JSON-RPC 2.0| CLI
-    CLI <-->|Fast Windows Pipe Stream| Pipe
+    CLI <-->|Full-Duplex Named Pipe| Pipe
 ```
 
-1. **Pure Stdio (Zero Network Ports)**:
-   - Communicates standard input/output (`stdin`/`stdout`) through `CodesysMcpCli.exe` to a local Windows Named Pipe (`\\.\pipe\codesys_mcp_pipe`).
+1. **Pure Stdio & Full-Duplex Pipe Resilience (Zero Network Ports)**:
+   - Communicates `stdin`/`stdout` through `CodesysMcpCli.exe` to a local Windows Named Pipe (`\\.\pipe\codesys_mcp_pipe`) with full-duplex async pumps, `PendingRequestIds` EOF draining (never exits prematurely on one-shot CLI calls), 15s idle heartbeat probes, and automatic reconnection if `CODESYS.exe` restarts.
    - No firewall alerts, no port collisions, and no token/IP exposure.
-2. **True In-Process Performance**:
-   - Replaces traditional disk polling (`requests/*.json` <-> `results/*.json`) with direct in-memory calls.
-   - Response latency drops from hundreds of milliseconds to **single-digit milliseconds**.
-3. **CODESYS IDE (GUI) & Thread Safety**:
+2. **True In-Process Performance & Live IDE Editor Buffer Awareness**:
+   - Directly queries ScriptEngine objects and open CODESYS ST editor memory buffers (`SynEdControl.Buffer` & `SwitchableDeclarationEditor.DeclarationEditor`).
+   - `read_pou`, `search_code`, `get_diff`, `preview_diff`, and `.st` mirror sync immediately reflect unsaved live edits typed in the IDE without needing `Ctrl+S` or focus switches.
+3. **Real-Time One-Way `.st` Source Mirror & Auto-Git (`CODESYS -> .cds_mcp/src`)**:
+   - Automatically exports project POUs, GVLs, DUTs, Methods, Properties, and Actions to `<project_dir>\.cds_mcp\src` with YAML metadata headers (`name`, `type`, `path`), SHA-256 content-diff guards, and background `git commit` on `save_project` or manual IDE `Ctrl+S`.
+4. **CODESYS IDE (GUI) & Thread Safety**:
    - Integrates with the CODESYS IDE UI message loop via `SynchronizationContext.Send()`.
    - Modifying POUs or triggering builds from background threads will never crash or freeze the IDE interface.
-4. **No 3S Digital Signature Required**:
+5. **No 3S Digital Signature Required**:
    - Bypasses strict third-party `.package` certificate requirements by using CLR native assembly loading inside CODESYS ScriptEngine.
 
 ---
@@ -56,22 +58,39 @@ flowchart LR
 ```text
 codesys-mcp-plugin/
 ├── bin/Release/
-│   ├── CodesysMcp.dll              # In-process C# MCP server loaded by CODESYS CLR
-│   └── CodesysMcpCli.exe           # Pure Stdio bridge executable for AI clients
-├── CodesysMcp/                     # C# native plugin source code
-│   ├── CodesysContext.cs           # CODESYS context & UI thread synchronization
-│   ├── CodesysOperations.cs        # Project, POU, and compiler APIs via IExtendedObject.Extensions
-│   ├── McpServer.cs                # Named Pipe JSON-RPC 2.0 protocol engine
-│   └── ServerBootstrap.cs          # Entry point called by IronPython bootstrap
+│   ├── CodesysMcp.dll                   # In-process C# MCP server loaded by CODESYS CLR
+│   └── CodesysMcpCli.exe                # Full-duplex Stdio bridge with heartbeat & auto-reconnect
+├── CodesysMcp/                          # C# native plugin source code (partial class architecture)
+│   ├── CodesysContext.cs                # CODESYS context & UI thread synchronization
+│   ├── CodesysOperations.cs             # Project/tree APIs, snapshots, & baseline tracking
+│   ├── CodesysOperations.Pou.cs         # POU CRUD, folders, interfaces, methods & properties
+│   ├── CodesysOperations.Compiler.cs    # Compilation & IDE message channel queries
+│   ├── CodesysOperations.SearchAndDiff.cs # Live-buffer search, diff generation, preview & rollback
+│   ├── CodesysOperations.Mirror.cs      # Adaptive IDE-to-.st mirror polling & Git commit hooks
+│   ├── McpServer.cs                     # Full-duplex Named Pipe JSON-RPC 2.0 protocol engine
+│   ├── McpServer.Schemas.cs             # Registered MCP tool definitions (43 tools) & dispatch schemas
+│   ├── CodesysEditorBufferHelper.cs     # Reflection reader for live unsaved ST/declaration editor buffers
+│   ├── SourceMirrorHelper.cs            # One-way .st serializer, SHA-256 diff guard & Git integration
+│   ├── CodesysOnlineHelper.cs           # Online PLC control, variables, structs, arrays & trace helpers
+│   ├── PlcTraceAndLoggerHelper.cs       # Ring-buffer PLC logger, device logs & trace CSV/XML analyzer
+│   ├── CodesysIdeUiHelper.cs            # IDE status strip badge, diagnostics card & mirror controls
+│   ├── DeviceLogonWatchdog.cs           # Native Win32 modal logon watchdog
+│   └── ServerBootstrap.cs               # Entry point called by IronPython bootstrap
 ├── CodesysMcpCli/
-│   └── Program.cs                  # High-throughput stdin/stdout pipe forwarder
-├── codesys_mcp_session.py          # Session bootstrapper (auto-detects GUI IDE vs --noUI mode)
-├── start_codesys_ide_with_mcp.bat  # 1-Click launcher for CODESYS IDE with auto-attached MCP
-├── run_codesys_mcp.ps1             # PowerShell runner supporting both GUI and Headless modes
-├── launch_mcp.py                   # Python daemon launcher for headless environments
-├── build.ps1                       # Automated Roslyn C# build script
-├── package_release.ps1             # 1-Click release packaging script
-└── test_cli_stdio.py               # End-to-end Stdio MCP regression test suite
+│   └── Program.cs                       # Full-duplex stdin/stdout pipe forwarder & EOF drain engine
+├── CodesysMcpTests/                     # C# unit & real-DLL contract test suite (137 tests)
+├── tests/
+│   ├── test_cli_protocol.py             # Mock Named Pipe CLI protocol, heartbeat & reconnect tests
+│   ├── test_codesys_e2e.py              # Live CODESYS MCP E2E integration suite
+│   └── test_live_ide_editor_sync.py     # Background Win32 GUI keystroke + live buffer + E2E runner
+├── codesys_mcp_session.py               # Session bootstrapper (auto-detects GUI IDE vs --noUI mode)
+├── start_codesys_ide_with_mcp.bat       # 1-Click launcher for CODESYS IDE with auto-attached MCP
+├── run_codesys_mcp.ps1                  # PowerShell runner supporting both GUI and Headless modes
+├── launch_mcp.py                        # Python daemon launcher for headless environments
+├── build.ps1                            # Automated Roslyn C# build script
+├── run_tests.ps1                        # Automated build, C# unit tests & Python protocol test runner
+├── package_release.ps1                  # 1-Click release packaging script
+└── test_cli_stdio.py                    # Stdio MCP smoke demonstration script
 ```
 
 ---
@@ -170,18 +189,19 @@ This plugin incorporates a **three-tier safety architecture** providing silent, 
 | `CODESYS_MCP_LOG_FILE` | `~/.codesys-mcp-plugin/session_debug.log` | Unified runtime log path (with automatic 10MB rollover) |
 | `CODESYS_MCP_PIPE` | `codesys_mcp_pipe` | Windows Named Pipe identifier (`\\.\pipe\codesys_mcp_pipe`) |
 | `CODESYS_MCP_PROJECT` | None | Absolute path to a `.project` file to open automatically on startup |
+| `CODESYS_MCP_MIRROR_DIR` | `<project_dir>\.cds_mcp\src` | Custom target directory for one-way `.st` source mirroring (`CODESYS -> .st`) |
 
 ---
 
-## 🛠️ Supported MCP Tools (42 Tools)
+## 🛠️ Supported MCP Tools (43 Tools)
 
 ### 1. Project Management & Navigation
 | Tool Name | Arguments | Description |
 | :--- | :--- | :--- |
 | `open_project` | `path: string` | Opens an existing `.project` file in CODESYS. |
 | `close_project` | None | Closes the currently active project. |
-| `save_project` | None | Saves all modifications in the current project. |
-| `get_project_info` | None | Returns active project name, file path, dirty status (`isDirty`), and active application. |
+| `save_project` | None | Saves all modifications in the current project and commits `.st` mirror changes to Git. |
+| `get_project_info` | None | Returns active project name, file path, dirty status (`isDirty`), active application, and `.st` mirror status (`mirrorEnabled`, `mirrorDir`, `mirrorMode`, `mirrorGitEnabled`). |
 | `get_project_tree` | `full?: bool` | Recursively retrieves the project tree (devices, apps, POUs, GVLs, tasks). |
 | `create_folder` | `name: string`, `parent?: string` | Creates an organizational folder within the project. |
 | `create_interface` | `name: string`, `folder?: string` | Creates a new IEC interface (`ITF`). |
@@ -189,16 +209,17 @@ This plugin incorporates a **three-tier safety architecture** providing silent, 
 | `create_property` | `pou: string`, `name: string`, `type?: string` | Creates a new property (`PROPERTY`) under a POU or FB. |
 | `create_boot_application` | `application?: string` | Generates a boot application on the target controller. |
 
-### 2. Code Editing, Search & Snapshot Rollback
+### 2. Code Editing, Search, Mirror & Snapshot Rollback
 | Tool Name | Arguments | Description |
 | :--- | :--- | :--- |
-| `read_pou` | `name: string` | Reads the declaration (`VAR...END_VAR`) and implementation (`ST`) of a POU. |
+| `read_pou` | `name: string` | Reads the declaration (`VAR...END_VAR`) and implementation (`ST`) of a POU, including live unsaved IDE editor buffers. |
 | `write_pou` | `name`, `declaration`, `implementation`, `type` | Creates or updates a POU (`Program`, `FunctionBlock`, or `Function`). |
 | `delete_pou` | `name: string` | Deletes a POU or object from the project. |
-| `search_code` | `query: string`, `is_regex?: bool`, `scope?: string` | Searches plain text or regex across all POUs, GVLs, and DUTs with line numbers and context. |
-| `get_diff` | `name?: string`, `section?: string` | Generates standard Unified Diff showing modifications made during the current session. |
-| `preview_diff` | `name: string`, `declaration?: string`, `implementation?: string` | Previews changes as a unified diff before applying writes. |
+| `search_code` | `query: string`, `is_regex?: bool`, `scope?: string` | Searches plain text or regex across all POUs, GVLs, and DUTs (including live unsaved IDE buffers) with line numbers and context. |
+| `get_diff` | `name?: string`, `section?: string` | Generates standard Unified Diff showing modifications made during the current session (including manual unsaved IDE edits). |
+| `preview_diff` | `name: string`, `declaration?: string`, `implementation?: string` | Previews changes as a unified diff against live editor buffers and session baselines before applying writes. |
 | `rollback_pou` | `name: string` | Safely rolls back a POU to its session baseline snapshot, or deletes it if newly created. |
+| `sync_sources_to_disk` | `mirror_dir?: string`, `persist_for_session?: bool`, `root_node?: string`, `watch?: bool`, `disable?: bool` | Incrementally mirrors POUs, DUTs, GVLs, and methods to readable `.st` files (one-way `CODESYS -> .st` with auto-git on save). |
 
 ### 3. Compilation & IDE Message Sensing
 | Tool Name | Arguments | Description |
@@ -267,6 +288,10 @@ powershell -ExecutionPolicy Bypass -File run_tests.ps1
 To additionally include live CODESYS E2E tests against an active IDE:
 ```powershell
 powershell -ExecutionPolicy Bypass -File run_tests.ps1 -IncludeE2E
+```
+To run automated background GUI keystroke + live buffer sync + full MCP E2E verification (launching an isolated CODESYS session if needed):
+```powershell
+python tests/test_live_ide_editor_sync.py --launch-if-needed --close-after --run-mcp-e2e
 ```
 
 ### Run Manual Stdio Demonstration

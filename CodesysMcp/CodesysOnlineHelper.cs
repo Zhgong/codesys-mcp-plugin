@@ -556,7 +556,7 @@ namespace CodesysMcp
                 ClearSession();
                 CodesysContext.LogToIde("plc_logout: Disconnected and logged out from PLC");
                 return GetOnlineStatus();
-            });
+            }, 120000);
         }
 
         public static OnlineStatusResult PlcControl(string action)
@@ -617,7 +617,7 @@ namespace CodesysMcp
                 }
 
                 return GetOnlineStatus();
-            });
+            }, 120000);
         }
 
         public static ReadVariablesResult ReadVariables(List<string> expressions)
@@ -734,7 +734,7 @@ namespace CodesysMcp
                 }
 
                 return GetOnlineStatus();
-            });
+            }, 120000);
         }
 
         public static void FlattenObject(string prefix, object obj, Dictionary<string, string> output)
@@ -1191,7 +1191,7 @@ namespace CodesysMcp
                 app.create_boot_application(null);
                 CodesysContext.LogToIde("create_boot_application: Successfully created boot project for application");
                 return "Boot application created successfully.";
-            });
+            }, 120000);
         }
 
         public static object InspectOnline(string targetName = "Device")

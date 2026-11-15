@@ -231,7 +231,7 @@ namespace CodesysMcp
             switch (_currentStatus)
             {
                 case McpServerStatus.Online:
-                    _statusBadge.Text = "● MCP: Online";
+                    _statusBadge.Text = SourceMirrorHelper.HasActiveMirror ? "● MCP: Online | Mirror: ON" : "● MCP: Online";
                     _statusBadge.ForeColor = Color.ForestGreen;
                     break;
                 case McpServerStatus.Busy:
@@ -257,17 +257,62 @@ namespace CodesysMcp
             _statusBadge.ToolTipText = BuildTooltipText();
         }
 
+        public static void RefreshMirrorIndicator()
+        {
+            if (_statusBadge == null || _hostStatusStrip == null) return;
+            try
+            {
+                if (_hostStatusStrip.InvokeRequired)
+                {
+                    _hostStatusStrip.BeginInvoke(new Action(ApplyStatusToBadge));
+                }
+                else
+                {
+                    ApplyStatusToBadge();
+                }
+            }
+            catch { }
+        }
+
         public static string GetServerVersion()
         {
             var ver = typeof(CodesysIdeUiHelper).Assembly.GetName().Version;
-            return ver != null ? ver.ToString(3) : "1.0.0";
+            if (ver == null) return "1.0.0";
+            return ver.Revision > 0 ? ver.ToString(4) : ver.ToString(3);
+        }
+
+        public static string BuildMcpClientConfigJson(string pipeName = null)
+        {
+            string exeDir = Path.GetDirectoryName(typeof(CodesysIdeUiHelper).Assembly.Location) ?? string.Empty;
+            if (string.Equals(Path.GetFileName(exeDir), "shadow", StringComparison.OrdinalIgnoreCase))
+            {
+                exeDir = Path.GetDirectoryName(exeDir) ?? exeDir;
+            }
+            string cliPath = Path.Combine(exeDir, "CodesysMcpCli.exe").Replace("\\", "\\\\");
+            string pipe = string.IsNullOrWhiteSpace(pipeName) ? _currentPipeName : pipeName;
+            return "{\n" +
+                   "  \"mcpServers\": {\n" +
+                   "    \"codesys\": {\n" +
+                   $"      \"command\": \"{cliPath}\",\n" +
+                   $"      \"args\": [\"--pipe\", \"{pipe}\"]\n" +
+                   "    }\n" +
+                   "  }\n" +
+                   "}";
         }
 
         public static string BuildTooltipText()
         {
+            string mirrorStatus = SourceMirrorHelper.HasActiveMirror
+                ? $"ON ({SourceMirrorHelper.ActiveMirrorDirectory})"
+                : "OFF";
+            string lastCommitLine = !string.IsNullOrEmpty(SourceMirrorHelper.LastCommitHash)
+                ? $"Last Commit: {SourceMirrorHelper.LastCommitHash} ({SourceMirrorHelper.LastCommitTimeUtc.ToLocalTime():HH:mm:ss})\n"
+                : string.Empty;
             return $"CODESYS MCP Server v{GetServerVersion()}\n" +
                    $"Status: {_currentStatus}\n" +
                    $"Pipe: \\\\.\\pipe\\{_currentPipeName}\n" +
+                   $"Mirror Sync: {mirrorStatus}\n" +
+                   lastCommitLine +
                    $"Total Requests: {_requestCounter}\n" +
                    $"Active Tool: {_activeTool ?? "None"}\n" +
                    (!string.IsNullOrEmpty(_lastError) ? $"Last Error: {_lastError}\n" : "State: Healthy\n") +
@@ -549,6 +594,117 @@ namespace CodesysMcp
 
             menu.Items.Add(new ToolStripSeparator());
 
+            var mirrorToggleItem = new ToolStripMenuItem("🔄 Auto .st Mirror Sync (Project → .st)");
+            mirrorToggleItem.Click += (s, e) =>
+            {
+                try
+                {
+                    if (SourceMirrorHelper.HasActiveMirror)
+                    {
+                        CodesysOperations.SyncSourcesToDisk(disable: true);
+                        CodesysContext.LogToIde("[Mirror] Auto .st Mirror Sync disabled via IDE menu.");
+                    }
+                    else
+                    {
+                        string targetDir = SourceMirrorHelper.LastBoundMirrorDirectory;
+                        if (string.IsNullOrWhiteSpace(targetDir))
+                        {
+                            var proj = CodesysContext.RunOnPrimaryThread(() => CodesysContext.PrimaryProject);
+                            if (proj != null && !string.IsNullOrWhiteSpace(proj.path))
+                            {
+                                targetDir = SourceMirrorHelper.GetDefaultProjectMirrorDirectory(proj.path);
+                            }
+                        }
+                        if (string.IsNullOrWhiteSpace(targetDir))
+                        {
+                            targetDir = BrowseForMirrorFolder();
+                        }
+                        if (!string.IsNullOrWhiteSpace(targetDir))
+                        {
+                            CodesysOperations.SyncSourcesToDisk(targetDir, persistForSession: true, disable: false, rootNode: SourceMirrorHelper.ActiveRootNode, watch: true);
+                        }
+                    }
+                    RefreshMirrorIndicator();
+                }
+                catch (Exception ex)
+                {
+                    CodesysContext.LogToIde("[ERROR] CodesysIdeUiHelper: Mirror toggle failed: " + ex.Message);
+                    MessageBox.Show("Mirror sync toggle failed:\n" + ex.Message, "CODESYS MCP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+            menu.Items.Add(mirrorToggleItem);
+
+            var mirrorFolderItem = new ToolStripMenuItem("📁 Choose .st Mirror Folder...");
+            mirrorFolderItem.Click += (s, e) =>
+            {
+                try
+                {
+                    string selected = BrowseForMirrorFolder(SourceMirrorHelper.ActiveMirrorDirectory ?? SourceMirrorHelper.LastBoundMirrorDirectory);
+                    if (!string.IsNullOrWhiteSpace(selected))
+                    {
+                        CodesysOperations.SyncSourcesToDisk(selected, persistForSession: true, disable: false, rootNode: SourceMirrorHelper.ActiveRootNode, watch: true);
+                        RefreshMirrorIndicator();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    CodesysContext.LogToIde("[ERROR] CodesysIdeUiHelper: Choose mirror folder failed: " + ex.Message);
+                    MessageBox.Show("Failed to bind mirror folder:\n" + ex.Message, "CODESYS MCP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+            menu.Items.Add(mirrorFolderItem);
+
+            var openMirrorItem = new ToolStripMenuItem("📂 Open .st Mirror Folder");
+            openMirrorItem.Click += (s, e) =>
+            {
+                try
+                {
+                    string dir = SourceMirrorHelper.ActiveMirrorDirectory ?? SourceMirrorHelper.LastBoundMirrorDirectory;
+                    if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir))
+                    {
+                        System.Diagnostics.Process.Start("explorer.exe", dir);
+                    }
+                    else
+                    {
+                        MessageBox.Show("No active .st mirror folder found.", "CODESYS MCP", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    CodesysContext.LogToIde("[ERROR] CodesysIdeUiHelper: Open mirror folder failed: " + ex.Message);
+                }
+            };
+            menu.Items.Add(openMirrorItem);
+
+            var copyConfigItem = new ToolStripMenuItem("📋 Copy MCP Client Config (JSON)");
+            copyConfigItem.Click += (s, e) =>
+            {
+                try
+                {
+                    string cfg = BuildMcpClientConfigJson();
+                    Clipboard.SetText(cfg);
+                    MessageBox.Show("MCP client config JSON copied to clipboard!", "CODESYS MCP", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    CodesysContext.LogToIde("[ERROR] CodesysIdeUiHelper: Copy config failed: " + ex.Message);
+                }
+            };
+            menu.Items.Add(copyConfigItem);
+
+            menu.Opening += (s, e) =>
+            {
+                bool active = SourceMirrorHelper.HasActiveMirror;
+                mirrorToggleItem.Checked = active;
+                mirrorToggleItem.Text = active
+                    ? "🔄 Auto .st Mirror Sync (ON)"
+                    : "🔄 Auto .st Mirror Sync (OFF)";
+                string dir = SourceMirrorHelper.ActiveMirrorDirectory ?? SourceMirrorHelper.LastBoundMirrorDirectory;
+                openMirrorItem.Enabled = !string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir);
+            };
+
+            menu.Items.Add(new ToolStripSeparator());
+
             var reanchorItem = new ToolStripMenuItem("🔄 Re-anchor Bottom Status Bar");
             reanchorItem.Click += (s, e) =>
             {
@@ -565,6 +721,22 @@ namespace CodesysMcp
             menu.Items.Add(reanchorItem);
 
             return menu;
+        }
+
+        private static string BrowseForMirrorFolder(string initialPath = null)
+        {
+            using (var dlg = new FolderBrowserDialog())
+            {
+                dlg.Description = "Select folder for bidirectional .st source mirror sync";
+                dlg.ShowNewFolderButton = true;
+                if (!string.IsNullOrWhiteSpace(initialPath) && Directory.Exists(initialPath))
+                {
+                    dlg.SelectedPath = initialPath;
+                }
+                Control owner = FindMainCodesysForm();
+                DialogResult res = owner != null ? dlg.ShowDialog(owner) : dlg.ShowDialog();
+                return res == DialogResult.OK ? dlg.SelectedPath : null;
+            }
         }
 
         public static string BuildDiagnosticsText()

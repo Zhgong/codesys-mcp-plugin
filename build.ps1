@@ -3,7 +3,8 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $versionFile = Join-Path $Root "VERSION"
 $version = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { "1.1.0" }
-$fileVersion = "$version.0"
+$verParts = ($version -split '\.')
+$fileVersion = if ($verParts.Count -ge 4) { $version } else { "$version.0" }
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host " Building CodesysMcp v$version" -ForegroundColor Cyan

@@ -42,6 +42,13 @@ namespace CodesysMcp
                     CodesysIdeUiHelper.InstallStatusIndicator(pipeName ?? McpServer.DefaultPipeName);
                 }
                 catch { }
+
+                try
+                {
+                    CodesysOperations.StartIdeToDiskPolling();
+                    CodesysOperations.EnsureDefaultMirrorForOpenProject();
+                }
+                catch { }
             }
             catch (Exception ex)
             {
@@ -52,6 +59,13 @@ namespace CodesysMcp
 
         public static void Stop()
         {
+            try
+            {
+                CodesysOperations.StopIdeToDiskPolling();
+                SourceMirrorHelper.StopWatching();
+            }
+            catch { }
+
             try
             {
                 CodesysIdeUiHelper.RemoveStatusIndicator();

@@ -105,6 +105,20 @@ namespace CodesysMcpTests
             Assert.IsTrue(titles.Exists(t => t.Contains("Diagnostics")), "Menu must contain Diagnostics item");
             Assert.IsTrue(titles.Exists(t => t.Contains("Log")), "Menu must contain Log item");
             Assert.IsTrue(titles.Exists(t => t.Contains("Re-anchor")), "Menu must contain Re-anchor item");
+            Assert.IsTrue(titles.Exists(t => t.Contains("Mirror Sync")), "Menu must contain Mirror Sync toggle item");
+            Assert.IsTrue(titles.Exists(t => t.Contains("Mirror Folder")), "Menu must contain Choose Mirror Folder item");
+            Assert.IsTrue(titles.Exists(t => t.Contains("Open .st Mirror")), "Menu must contain Open .st Mirror Folder item");
+            Assert.IsTrue(titles.Exists(t => t.Contains("Copy MCP Client Config")), "Menu must contain Copy MCP Client Config item");
+        }
+
+        [TestMethod]
+        public void TestBuildMcpClientConfigJsonContainsCliExe()
+        {
+            string cfg = CodesysIdeUiHelper.BuildMcpClientConfigJson("codesys_mcp_pipe");
+            Assert.IsNotNull(cfg);
+            Assert.IsTrue(cfg.Contains("mcpServers"), "Config must contain mcpServers");
+            Assert.IsTrue(cfg.Contains("CodesysMcpCli.exe"), "Config must reference CodesysMcpCli.exe");
+            Assert.IsTrue(cfg.Contains("codesys_mcp_pipe"), "Config must include pipe name");
         }
 
         [TestMethod]
@@ -130,7 +144,7 @@ namespace CodesysMcpTests
         {
             string version = CodesysIdeUiHelper.GetServerVersion();
             Assert.IsNotNull(version, "Server version should not be null");
-            Assert.AreEqual("1.2.5", version, "Version should match assembly and VERSION file (1.2.5)");
+            Assert.AreEqual("1.3.0", version, "Version should match assembly and VERSION file (1.3.0)");
         }
 
         [TestMethod]

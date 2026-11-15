@@ -65,11 +65,22 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CodesysContext.cs" />
-    <Compile Include="CodesysOperations.cs" />
+    <Compile Include="CodesysEditorBufferHelper.cs" />
+    <Compile Include="CodesysIdeUiHelper.cs" />
     <Compile Include="CodesysOnlineHelper.cs" />
+    <Compile Include="CodesysOperations.cs" />
+    <Compile Include="CodesysOperations.Compiler.cs" />
+    <Compile Include="CodesysOperations.Mirror.cs" />
+    <Compile Include="CodesysOperations.Pou.cs" />
+    <Compile Include="CodesysOperations.SearchAndDiff.cs" />
+    <Compile Include="DeviceLogonWatchdog.cs" />
+    <Compile Include="DiffHelper.cs" />
     <Compile Include="DiffViewerHelper.cs" />
     <Compile Include="McpServer.cs" />
+    <Compile Include="McpServer.Schemas.cs" />
+    <Compile Include="PlcTraceAndLoggerHelper.cs" />
     <Compile Include="ServerBootstrap.cs" />
+    <Compile Include="SourceMirrorHelper.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
