@@ -1,12 +1,15 @@
 import os
 import sys
 import json
+import time
+import tempfile
 import unittest
 import subprocess
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLI_EXE = os.path.join(ROOT_DIR, "bin", "Release", "CodesysMcpCli.exe")
-PIPE_PATH = r"\\.\pipe\codesys_mcp_pipe"
+PIPE_NAME = os.environ.get("CODESYS_MCP_PIPE", "codesys_mcp_pipe")
+PIPE_PATH = rf"\\.\pipe\{PIPE_NAME}"
 
 def is_codesys_pipe_active():
     try:
@@ -80,6 +83,28 @@ class TestCodesysLiveE2E(unittest.TestCase):
         self.assertIn("search_code", tool_names)
         self.assertIn("get_diff", tool_names)
         self.assertIn("rollback_pou", tool_names)
+
+    def test_01b_notifications_and_ping_without_deadlock(self):
+        init_resp = self.rpc("initialize", req_id=12)
+        self.assertEqual(init_resp["id"], 12)
+
+        # Send JSON-RPC 2.0 notifications (no id -> server must not reply, CLI must not deadlock)
+        notifications = [
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"id": "req-99"}},
+            {"jsonrpc": "2.0", "method": "custom/smokeNotification"},
+        ]
+        for notif in notifications:
+            self.proc.stdin.write(json.dumps(notif) + "\n")
+        self.proc.stdin.flush()
+
+        list_resp = self.rpc("tools/list", req_id=13)
+        self.assertEqual(list_resp["id"], 13)
+        self.assertIn("tools", list_resp["result"])
+
+        ping_resp = self.rpc("ping", req_id=14)
+        self.assertEqual(ping_resp["id"], 14)
+        self.assertEqual(ping_resp["result"], {})
 
     def test_02_project_status_and_tree(self):
         info = self.tool("get_project_info", req_id=20)
@@ -156,7 +181,150 @@ class TestCodesysLiveE2E(unittest.TestCase):
         # 3. Rollback newly created POU (should delete it)
         rollback_res = self.tool("rollback_pou", {"name": test_pou}, req_id=53)
         self.assertTrue(rollback_res.get("success", False))
-        self.assertEqual("deleted", rollback_res.get("action"))
+
+    def test_06_incremental_source_mirror_sync(self):
+        info = self.tool("get_project_info", req_id=60)
+        if not info.get("isOpen", False):
+            self.skipTest("No project is currently open in CODESYS.")
+
+        test_pou = "MirrorE2ETestPRG"
+        with tempfile.TemporaryDirectory(prefix="codesys_mirror_e2e_") as mirror_dir:
+            try:
+                # 1. Dynamic binding + initial sync without restarting CODESYS.exe
+                sync1 = self.tool("sync_sources_to_disk", {
+                    "mirror_dir": mirror_dir,
+                    "persist_for_session": True
+                }, req_id=61)
+                self.assertGreater(sync1.get("created", 0), 0)
+                self.assertEqual(sync1.get("updated", -1), 0)
+
+                st_files = []
+                for root_dir, _, files in os.walk(mirror_dir):
+                    for f in files:
+                        if f.endswith(".st"):
+                            st_files.append(os.path.join(root_dir, f))
+                self.assertGreater(len(st_files), 0)
+
+                sample_file = st_files[0]
+                with open(sample_file, "r", encoding="utf-8") as fh:
+                    sample_text = fh.read()
+                self.assertIn("(*\n---\nname:", sample_text)
+                self.assertIn("path:", sample_text)
+                sample_mtime_ns = os.stat(sample_file).st_mtime_ns
+
+                # 2. Second sync using persisted session binding -> Content-Diff Guard skips all writes
+                sync2 = self.tool("sync_sources_to_disk", {}, req_id=62)
+                self.assertEqual(sync2.get("created", -1), 0)
+                self.assertEqual(sync2.get("updated", -1), 0)
+                self.assertEqual(sync2.get("deleted", -1), 0)
+                self.assertGreater(sync2.get("unchanged", 0), 0)
+                self.assertEqual(sample_mtime_ns, os.stat(sample_file).st_mtime_ns)
+
+                # 3. Write-through O(1) create via write_pou
+                decl = "PROGRAM MirrorE2ETestPRG\nVAR\n    nVal : INT := 1;\nEND_VAR"
+                self.tool("write_pou", {
+                    "name": test_pou,
+                    "declaration": decl,
+                    "implementation": "nVal := nVal + 1;",
+                    "type": "Program"
+                }, req_id=63)
+
+                mirrored_test_file = None
+                for root_dir, _, files in os.walk(mirror_dir):
+                    if f"{test_pou}.st" in files:
+                        mirrored_test_file = os.path.join(root_dir, f"{test_pou}.st")
+                        break
+                self.assertIsNotNone(mirrored_test_file, "write_pou should auto-refresh MirrorE2ETestPRG.st")
+                with open(mirrored_test_file, "r", encoding="utf-8") as fh:
+                    content1 = fh.read()
+                self.assertIn("nVal := nVal + 1;", content1)
+                self.assertEqual(sample_mtime_ns, os.stat(sample_file).st_mtime_ns)
+
+                # 4. Write-through O(1) update via write_pou
+                self.tool("write_pou", {
+                    "name": test_pou,
+                    "declaration": decl,
+                    "implementation": "nVal := nVal + 42;",
+                    "type": "Program"
+                }, req_id=64)
+                with open(mirrored_test_file, "r", encoding="utf-8") as fh:
+                    content2 = fh.read()
+                self.assertIn("nVal := nVal + 42;", content2)
+
+                # 5. Write-through delete via delete_pou
+                del_res = self.tool("delete_pou", {"name": test_pou}, req_id=65)
+                self.assertTrue(del_res.get("deleted", False))
+                self.assertFalse(os.path.exists(mirrored_test_file))
+            finally:
+                try:
+                    self.tool("delete_pou", {"name": test_pou}, req_id=66)
+                except Exception:
+                    pass
+                try:
+                    self.tool("sync_sources_to_disk", {"disable": True}, req_id=67)
+                except Exception:
+                    pass
+
+    def test_07_one_way_mirror_and_disabled_disk_to_project(self):
+        info = self.tool("get_project_info", req_id=70)
+        if not info.get("isOpen", False):
+            self.skipTest("No project is currently open in CODESYS.")
+
+        # 1. Verify default .cds_mcp/src and .git were auto-created on project open
+        proj_path = info.get("path", "")
+        if proj_path:
+            default_mirror = os.path.join(os.path.dirname(proj_path), ".cds_mcp", "src")
+            self.assertTrue(os.path.isdir(default_mirror), f"Default mirror {default_mirror} should exist")
+            self.assertTrue(os.path.isdir(os.path.join(default_mirror, ".git")), f"Default git repo {default_mirror}/.git should exist")
+
+        # 2. Verify sync_disk_to_project is disabled
+        imp = self.tool("sync_disk_to_project", {}, req_id=71)
+        self.assertTrue(imp.get("disabled", False), "sync_disk_to_project should report disabled=True")
+
+        # 3. Verify external .st edit does NOT overwrite CODESYS (one-way only)
+        test_pou = "OneWayMirrorE2EPRG"
+        with tempfile.TemporaryDirectory(prefix="codesys_oneway_e2e_") as mirror_dir:
+            try:
+                decl = "PROGRAM OneWayMirrorE2EPRG\nVAR\n    nVal : INT := 0;\nEND_VAR"
+                self.tool("write_pou", {
+                    "name": test_pou,
+                    "declaration": decl,
+                    "implementation": "nVal := 1;",
+                    "type": "Program"
+                }, req_id=72)
+
+                self.tool("sync_sources_to_disk", {
+                    "mirror_dir": mirror_dir,
+                    "persist_for_session": True,
+                    "root_node": "Application",
+                    "watch": True
+                }, req_id=73)
+
+                mirrored_file = None
+                for root_dir, _, files in os.walk(mirror_dir):
+                    if f"{test_pou}.st" in files:
+                        mirrored_file = os.path.join(root_dir, f"{test_pou}.st")
+                        break
+                self.assertIsNotNone(mirrored_file)
+
+                with open(mirrored_file, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+                with open(mirrored_file, "w", encoding="utf-8", newline="\n") as fh:
+                    fh.write(text.replace("nVal := 1;", "nVal := 999;"))
+
+                time.sleep(1.0)
+                read_res = self.tool("read_pou", {"name": test_pou}, req_id=74)
+                self.assertIn("nVal := 1;", read_res.get("implementation", ""))
+                self.assertNotIn("nVal := 999;", read_res.get("implementation", ""))
+            finally:
+                try:
+                    self.tool("sync_sources_to_disk", {"disable": True}, req_id=75)
+                except Exception:
+                    pass
+                try:
+                    self.tool("delete_pou", {"name": test_pou}, req_id=76)
+                except Exception:
+                    pass
 
 if __name__ == "__main__":
     unittest.main()

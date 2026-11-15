@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Web.Script.Serialization;
@@ -30,7 +30,7 @@ namespace CodesysMcpTests
 
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools, "tools array should not be null");
-            Assert.AreEqual(42, tools.Count, "Expected exactly 42 registered tools");
+            Assert.AreEqual(43, tools.Count, "Expected exactly 43 registered tools");
 
             var expectedTools = new HashSet<string>
             {
@@ -49,6 +49,7 @@ namespace CodesysMcpTests
                 "get_compiler_messages",
                 "get_message_categories",
                 "save_project",
+                "sync_sources_to_disk",
                 "search_code",
                 "get_diff",
                 "rollback_pou",
@@ -90,6 +91,18 @@ namespace CodesysMcpTests
             }
 
             Assert.AreEqual(0, expectedTools.Count, "All expected tools should have been present");
+
+            // Deprecated sync_disk_to_project stays hidden from tools/list, while direct tools/call fails gracefully with disabled=true.
+            var callRes = Call("{\"jsonrpc\": \"2.0\", \"id\": 201, \"method\": \"tools/call\", \"params\": {\"name\": \"sync_disk_to_project\", \"arguments\": {}}}");
+            Assert.IsNotNull(callRes);
+            var callResult = callRes["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(callResult);
+            var content = callResult["content"] as ArrayList;
+            Assert.IsNotNull(content);
+            Assert.IsTrue(content.Count > 0);
+            var firstItem = content[0] as Dictionary<string, object>;
+            var payload = _json.Deserialize<Dictionary<string, object>>(firstItem["text"]?.ToString() ?? "{}");
+            Assert.IsTrue(payload.ContainsKey("disabled") && Convert.ToBoolean(payload["disabled"]), "Direct call to sync_disk_to_project should still return disabled=true");
         }
 
         [TestMethod]

@@ -69,6 +69,7 @@ namespace CodesysMcpTests
 
     class Program
     {
+        [STAThread]
         static int Main(string[] args)
         {
             AppDomain.CurrentDomain.AssemblyResolve += (sender, resolveArgs) =>
@@ -124,7 +125,8 @@ namespace CodesysMcpTests
                 typeof(DeviceLoggerTests),
                 typeof(CompilerMessagesCategoryTests),
                 typeof(SessionLogSyncTests),
-                typeof(DeviceLogonCredentialTests)
+                typeof(DeviceLogonCredentialTests),
+                typeof(SourceMirrorTests)
             };
 
             int passed = 0;

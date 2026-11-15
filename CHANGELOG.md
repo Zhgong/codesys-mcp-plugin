@@ -2,6 +2,26 @@
 
 All notable changes to the `codesys-mcp-plugin` (CODESYS Native C# Stdio MCP Server) project will be documented in this file.
 
+## [1.3.0] - 2026-11-15
+
+### Added
+- **Real-Time One-Way `.st` Source Mirror (`CODESYS → .cds_mcp/src`) & Auto-Git on Save** (#12):
+  - Added `sync_sources_to_disk` with IEC-comment YAML metadata headers (`name`, `type`, `path`), SHA-256 Content-Diff Guard (skip unchanged writes), orphan `.st` cleanup, and O(1) write-through hooks on `write_pou`, `delete_pou`, `rollback_pou`, `create_*`, and `save_project`.
+  - Auto-enabled one-way `.st` mirroring at startup and project open/switch, defaulting to `<project_dir>\.cds_mcp\src` with automatic `git init` and background `git commit` on `save_project` or manual IDE `Ctrl+S` saves.
+  - Added adaptive IDE polling (`OnIdeSyncTimerTick`) with deletion/rename tracking and IDE status strip mirror status indicator & quick controls.
+- **Live Unsaved IDE Editor Buffer Unification (`CodesysEditorBufferHelper`, `CodesysOperations`)** (#15):
+  - Unified `read_pou`, `search_code`, `get_diff`, `preview_diff`, and `.st` mirror sync (`OnIdeSyncTimerTick`) with live unsaved CODESYS ST editor buffers (`_3S.CoDeSys.TextEditor.SynEdControl.Buffer` & `_3S.CoDeSys.SwitchableDeclarationEditor.DeclarationEditor`).
+  - Added non-empty content guard to prevent uninitialized/unloaded UI editor panes from overwriting valid persisted POU code.
+  - Captured initial project baselines (`_projectBaselines`) on mirror attach/save so `get_diff` accurately diffs manual unsaved IDE keystrokes before `write_pou` or `Ctrl+S`.
+- **CLI Pipe Reliability, In-Flight EOF Drain & Auto-Reconnect (`CodesysMcpCli`)** (#9, #14):
+  - Added in-flight request ID tracking (`PendingRequestIds`) and a 15s EOF drain window so one-shot piped CLI calls never exit before receiving their JSON-RPC response.
+  - Added automatic Named Pipe reconnection when `CODESYS.exe` restarts and 15s idle heartbeat probes.
+
+### Changed
+- **Core Architecture & Schema Cleanup (`McpServer`, `CodesysOperations`)** (#13):
+  - Split `McpServer` (`McpServer.cs`, `McpServer.Schemas.cs`) and `CodesysOperations` (`CodesysOperations.cs`, `CodesysOperations.Pou.cs`, `CodesysOperations.Compiler.cs`, `CodesysOperations.SearchAndDiff.cs`, `CodesysOperations.Mirror.cs`) into focused `partial class` files and added `.gitattributes` line-ending normalization.
+  - Removed deprecated `sync_disk_to_project` from `tools/list` (`43` active MCP tools) while keeping graceful `tools/call` no-op compatibility.
+
 ## [1.2.5] - 2026-11-12
 
 ### Fixed

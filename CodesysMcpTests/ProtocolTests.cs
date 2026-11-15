@@ -102,6 +102,12 @@ namespace CodesysMcpTests
             Assert.IsNotNull(serverInfo);
             Assert.AreEqual("codesys-native-mcp", serverInfo["name"]?.ToString());
             Assert.IsTrue(serverInfo.ContainsKey("version"), "ServerInfo should include version");
+            Assert.AreEqual(CodesysIdeUiHelper.GetServerVersion(), serverInfo["version"]?.ToString());
+
+            Assert.IsTrue(result.ContainsKey("instructions"), "Initialize result should include instructions for AI auto-discovery");
+            string instructions = result["instructions"]?.ToString() ?? "";
+            Assert.IsTrue(instructions.Contains(".cds_mcp/src"), "Instructions should mention .cds_mcp/src mirror");
+            Assert.IsTrue(instructions.Contains("get_project_info"), "Instructions should direct clients to get_project_info");
 
             var capabilities = result["capabilities"] as Dictionary<string, object>;
             Assert.IsNotNull(capabilities);
