@@ -137,6 +137,7 @@ if ($common) {
         (Join-Path $framework "mscorlib.dll"),
         (Join-Path $framework "System.dll"),
         (Join-Path $framework "System.Core.dll"),
+        (Join-Path $framework "System.Drawing.dll"),
         (Join-Path $framework "System.Web.Extensions.dll"),
         (Join-Path $framework "System.Windows.Forms.dll"),
         (Join-Path $framework "System.Xml.dll"),
@@ -152,10 +153,11 @@ if ($common) {
     )
 
     $refArgs = $refs | ForEach-Object { "/reference:`"$_`"" }
+    $detArgs = if ($csc -notlike "*Microsoft.NET\Framework*\v4.0.30319\csc.exe") { @("/deterministic") } else { @() }
     $srcFiles = Get-ChildItem -Path (Join-Path $Root "CodesysMcp") -Recurse -Filter "*.cs" | ForEach-Object { "`"$($_.FullName)`"" }
 
     Write-Host "Compiling CodesysMcp.dll (v$version) with Roslyn..."
-    $allArgs = @("/target:library", "/optimize+", "/out:`"$outFile`"") + $refArgs + $srcFiles
+    $allArgs = @("/target:library", "/optimize+", "/out:`"$outFile`"") + $detArgs + $refArgs + $srcFiles
     & $csc $allArgs
 
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $outFile)) {
@@ -174,6 +176,7 @@ if ($common) {
 # Build CLI Proxy
 $cliSrc = (Get-Item $cliSrcPath).FullName
 $cliOut = Join-Path $outDir "CodesysMcpCli.exe"
+$detCliArgs = if ($csc -notlike "*Microsoft.NET\Framework*\v4.0.30319\csc.exe") { @("/deterministic") } else { @() }
 $cliRefs = @(
     (Join-Path $framework "mscorlib.dll"),
     (Join-Path $framework "System.dll"),
@@ -181,7 +184,7 @@ $cliRefs = @(
 ) | ForEach-Object { "/reference:`"$_`"" }
 
 Write-Host "Compiling CodesysMcpCli.exe (v$version)..."
-$cliArgs = @("/target:exe", "/optimize+", "/out:`"$cliOut`"") + $cliRefs + @("`"$cliSrc`"")
+$cliArgs = @("/target:exe", "/optimize+", "/out:`"$cliOut`"") + $detCliArgs + $cliRefs + @("`"$cliSrc`"")
 & $csc $cliArgs
 
 if ($LASTEXITCODE -eq 0 -and (Test-Path $cliOut)) {

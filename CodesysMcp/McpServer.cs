@@ -44,15 +44,17 @@ namespace CodesysMcp
         {
             if (!_isRunning) return;
             _isRunning = false;
-            try
+            for (int i = 0; i < 3; i++)
             {
-                using (var wake = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut))
-
+                try
                 {
-                    wake.Connect(100);
+                    using (var wake = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut))
+                    {
+                        wake.Connect(40);
+                    }
                 }
+                catch { }
             }
-            catch { }
             Console.WriteLine("[CodesysMcp] Pipe Server stopped.");
         }
 
@@ -550,11 +552,40 @@ namespace CodesysMcp
                 case "get_ui_indicator_status":
                     return CodesysOperations.GetUiIndicatorStatus();
 
+                case "capture_ide_screenshot":
+                    string capPath = args.ContainsKey("output_path") ? args["output_path"]?.ToString() : null;
+                    int capMaxW = args.ContainsKey("max_width") && args["max_width"] != null ? Convert.ToInt32(args["max_width"]) : 0;
+                    return CodesysOperations.CaptureIdeScreenshot(capPath, capMaxW);
+
+                case "control_trace":
+                    string ctName = args.ContainsKey("trace_name") && !string.IsNullOrEmpty(args["trace_name"]?.ToString())
+                        ? args["trace_name"].ToString()
+                        : "Trace";
+                    string ctAction = args.ContainsKey("action") ? args["action"]?.ToString() : "status";
+                    var ctOpts = new TraceTriggerConfigOptions
+                    {
+                        triggerEnabled = args.ContainsKey("trigger_enabled") && args["trigger_enabled"] != null ? (bool?)Convert.ToBoolean(args["trigger_enabled"]) : null,
+                        triggerVariable = args.ContainsKey("trigger_variable") ? args["trigger_variable"]?.ToString() : null,
+                        triggerEdge = args.ContainsKey("trigger_edge") ? args["trigger_edge"]?.ToString() : null,
+                        triggerLevel = args.ContainsKey("trigger_level") ? args["trigger_level"] : null,
+                        postTriggerSamples = args.ContainsKey("post_trigger_samples") && args["post_trigger_samples"] != null ? (int?)Convert.ToInt32(args["post_trigger_samples"]) : null,
+                        recordCondition = args.ContainsKey("record_condition") ? args["record_condition"]?.ToString() : null,
+                        everyNCycles = args.ContainsKey("every_n_cycles") && args["every_n_cycles"] != null ? (int?)Convert.ToInt32(args["every_n_cycles"]) : null,
+                        taskName = args.ContainsKey("task_name") ? args["task_name"]?.ToString() : null,
+                        autoStart = args.ContainsKey("auto_start") && args["auto_start"] != null ? (bool?)Convert.ToBoolean(args["auto_start"]) : null
+                    };
+                    return CodesysOperations.ControlTrace(ctName, ctAction, ctOpts.HasAnyValue ? ctOpts : null);
+
                 case "analyze_trace":
                     string atPath = args.ContainsKey("file_path") ? args["file_path"]?.ToString() : null;
                     string atCond = args.ContainsKey("filter_condition") ? args["filter_condition"]?.ToString() : null;
                     double atDeadband = args.ContainsKey("deadband") ? Convert.ToDouble(args["deadband"]) : 0.01;
-                    return CodesysOperations.AnalyzeTrace(atPath, atDeadband, atCond);
+                    bool atIncludeSeries = args.ContainsKey("include_series") && Convert.ToBoolean(args["include_series"]);
+                    double? atStartMs = (args.ContainsKey("start_ms") && args["start_ms"] != null) ? (double?)Convert.ToDouble(args["start_ms"]) : null;
+                    double? atEndMs = (args.ContainsKey("end_ms") && args["end_ms"] != null) ? (double?)Convert.ToDouble(args["end_ms"]) : null;
+                    int atMaxPoints = args.ContainsKey("max_points") ? Convert.ToInt32(args["max_points"]) : 0;
+                    string atTraceName = args.ContainsKey("trace_name") ? args["trace_name"]?.ToString() : null;
+                    return CodesysOperations.AnalyzeTrace(atPath, atDeadband, atCond, atIncludeSeries, atStartMs, atEndMs, atMaxPoints, atTraceName);
 
                 case "setup_plc_logger":
                     int slBuf = args.ContainsKey("buffer_size") ? Convert.ToInt32(args["buffer_size"]) : 64;

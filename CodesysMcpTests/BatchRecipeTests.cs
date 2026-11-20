@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Web.Script.Serialization;
 using CodesysMcp;
 
@@ -185,7 +186,7 @@ namespace CodesysMcpTests
             Assert.IsNotNull(result);
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools);
-            Assert.AreEqual(43, tools.Count);
+            Assert.AreEqual(45, tools.Count);
 
             var names = new List<string>();
             foreach (Dictionary<string, object> t in tools)
@@ -198,6 +199,8 @@ namespace CodesysMcpTests
             Assert.IsTrue(names.Contains("read_struct"));
             Assert.IsTrue(names.Contains("read_array"));
             Assert.IsTrue(names.Contains("get_ui_indicator_status"));
+            Assert.IsTrue(names.Contains("control_trace"));
+            Assert.IsTrue(names.Contains("capture_ide_screenshot"));
             Assert.IsTrue(names.Contains("analyze_trace"));
             Assert.IsTrue(names.Contains("setup_plc_logger"));
             Assert.IsTrue(names.Contains("read_plc_logs"));
@@ -248,6 +251,112 @@ namespace CodesysMcpTests
             var result = res["result"] as Dictionary<string, object>;
             Assert.IsNotNull(result);
             Assert.IsTrue(Convert.ToBoolean(result["isError"]));
+        }
+
+        private class MockOnlineApplicationForBatch
+        {
+            private readonly Dictionary<string, string> _prepared = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<string, int> _readAttempts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            public int WriteCommitCount { get; private set; }
+            public int ReadCallCount { get; private set; }
+            public int BatchReadCallCount { get; private set; }
+            public bool is_logged_in => true;
+
+            public void set_prepared_value(string name, string value)
+            {
+                _prepared[name] = value;
+            }
+
+            public void write_prepared_values()
+            {
+                WriteCommitCount++;
+            }
+
+            public void force_prepared_values()
+            {
+                WriteCommitCount++;
+            }
+
+            public string read_value(string name)
+            {
+                ReadCallCount++;
+                _readAttempts.TryGetValue(name, out int count);
+                _readAttempts[name] = count + 1;
+                // First read returns stale value so round-based retry runs once, then second read returns committed value
+                if (count == 0)
+                {
+                    return "0.0";
+                }
+                return _prepared.TryGetValue(name, out string val) ? val : "0.0";
+            }
+
+            public IList<string> read_values(string[] expressions)
+            {
+                BatchReadCallCount++;
+                var results = new List<string>(expressions.Length);
+                foreach (var expr in expressions)
+                {
+                    results.Add(read_value(expr));
+                }
+                return results;
+            }
+        }
+
+        [TestMethod]
+        public void TestBatchWriteRoundBasedVerificationAndDutCache()
+        {
+            var mockApp = new MockOnlineApplicationForBatch();
+            int origDelay = CodesysOnlineHelper.BatchVerifyRetryDelayMs;
+            int origRetries = CodesysOnlineHelper.BatchVerifyMaxRetries;
+            try
+            {
+                CodesysOnlineHelper.SetCachedOnlineAppForTesting(mockApp);
+                CodesysOnlineHelper.BatchVerifyRetryDelayMs = 30;
+                CodesysOnlineHelper.BatchVerifyMaxRetries = 3;
+
+                var batchVars = new Dictionary<string, string>();
+                for (int i = 0; i < 10; i++)
+                {
+                    batchVars[$"PLC_PRG.Var{i}"] = $"{100 + i}.0";
+                }
+
+                var sw = Stopwatch.StartNew();
+                var res = CodesysOnlineHelper.BatchWriteVariables(batchVars, verify: true, force: false);
+                sw.Stop();
+
+                Assert.IsTrue(res.success, "BatchWriteVariables should succeed");
+                Assert.IsTrue(res.allVerified, "All 10 delayed variables should verify after 1 batch retry round");
+                Assert.AreEqual(10, res.succeededCount);
+                Assert.AreEqual(0, res.failedCount);
+                Assert.AreEqual(1, mockApp.WriteCommitCount);
+                Assert.AreEqual(2, mockApp.BatchReadCallCount, "2 rounds should execute 2 batch read_values calls");
+                Assert.AreEqual(20, mockApp.ReadCallCount, "10 initial reads + 10 retry reads = 20 total reads");
+                Assert.IsTrue(sw.ElapsedMilliseconds < 250, $"Round-based batch verification took {sw.ElapsedMilliseconds}ms, expected < 250ms");
+
+                // Validate DUT cache hit and clearing lifecycle cleanly
+                CodesysOnlineHelper.ClearDutMembersCache();
+                Assert.AreEqual(0, CodesysOnlineHelper.GetDutMembersCacheCountForTesting());
+                CodesysOnlineHelper.SeedDutMembersCacheForTesting("ST_PressRecipe", new List<string> { "rTargetForce", "rFastSpeed" });
+                Assert.AreEqual(1, CodesysOnlineHelper.GetDutMembersCacheCountForTesting());
+                var cachedMembers = CodesysOnlineHelper.GetDutMembers("ST_PressRecipe");
+                Assert.AreEqual(2, cachedMembers.Count);
+                Assert.AreEqual("rTargetForce", cachedMembers[0]);
+                CodesysOnlineHelper.ClearDutMembersCache();
+                Assert.AreEqual(0, CodesysOnlineHelper.GetDutMembersCacheCountForTesting());
+                Assert.AreEqual(0, CodesysOnlineHelper.GetDutMembers("ST_PressRecipe").Count);
+
+                var readRes = CodesysOnlineHelper.ReadVariables(new List<string> { "PLC_PRG.Var0", "PLC_PRG.Var1" });
+                Assert.IsTrue(readRes.success);
+                Assert.AreEqual(3, mockApp.BatchReadCallCount, "ReadVariables must also use batch read_values");
+                Assert.AreEqual(22, mockApp.ReadCallCount);
+            }
+            finally
+            {
+                CodesysOnlineHelper.BatchVerifyRetryDelayMs = origDelay;
+                CodesysOnlineHelper.BatchVerifyMaxRetries = origRetries;
+                CodesysOnlineHelper.SetCachedOnlineAppForTesting(null);
+                CodesysOnlineHelper.ClearSession();
+            }
         }
     }
 }

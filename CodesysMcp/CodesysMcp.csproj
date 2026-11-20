@@ -33,6 +33,7 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Windows.Forms" />
@@ -68,6 +69,7 @@
     <Compile Include="CodesysEditorBufferHelper.cs" />
     <Compile Include="CodesysIdeUiHelper.cs" />
     <Compile Include="CodesysOnlineHelper.cs" />
+    <Compile Include="CodesysOnlineHelper.Variables.cs" />
     <Compile Include="CodesysOperations.cs" />
     <Compile Include="CodesysOperations.Compiler.cs" />
     <Compile Include="CodesysOperations.Mirror.cs" />
@@ -79,6 +81,7 @@
     <Compile Include="McpServer.cs" />
     <Compile Include="McpServer.Schemas.cs" />
     <Compile Include="PlcTraceAndLoggerHelper.cs" />
+    <Compile Include="PlcTraceAndLoggerHelper.Logger.cs" />
     <Compile Include="ServerBootstrap.cs" />
     <Compile Include="SourceMirrorHelper.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

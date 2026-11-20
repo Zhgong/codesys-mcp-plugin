@@ -2,6 +2,28 @@
 
 All notable changes to the `codesys-mcp-plugin` (CODESYS Native C# Stdio MCP Server) project will be documented in this file.
 
+## [1.4.0] - 2026-11-20
+
+### Added
+- **Trace Execution Control & Hardware/Runtime Signal Triggering (`control_trace`, `get_trace_info`)**:
+  - Added `control_trace` MCP tool supporting `status`, `configure`, `download`, `start`, `stop`, and `reset_trigger`.
+  - Added full hardware/runtime trigger & recording configuration via `ScriptTraceObject` reflection: `trigger_enabled`, `trigger_variable`, `trigger_edge` (`positive`/`negative`/`both`/`undefined`), `trigger_level`, `post_trigger_samples`, `record_condition`, `every_n_cycles`, `task_name`, and `auto_start`, plus readback in `get_trace_info`.
+  - Implemented 3-layer forced overwrite on `download` (`TraceManager.DeletePacket` pre-cleanup, `ISystem.prompt_answers["Strings.OverwriteExistingOnlineTrace"]`, and `DeviceLogonWatchdog` `#32770` modal prompt auto-confirmation) so re-downloading an existing online Trace never blocks the UI thread.
+- **IDE Main Window Screenshot Capture (`capture_ide_screenshot`)**:
+  - Added `capture_ide_screenshot(output_path?, max_width?)` using Win32 `PrintWindow(PW_RENDERFULLCONTENT)` strictly on the CODESYS IDE main form for automated visual acceptance.
+- **Direct Trace Waveform Export & Peak-Preserving Downsampling (`analyze_trace`)** (#8):
+  - Added live `trace_name` export via `ScriptTraceEditorObject.save()`, time-window filtering (`start_ms`/`end_ms`), and Min-Max peak-preserving downsampling (`include_series`, `max_points`).
+- **Native Batch Variable Reading (`read_variables`)** (#10):
+  - Switched `read_variables` to `OnlineApplication.read_values(string[])` single-roundtrip batch reads and added DUT member caching for `read_struct`.
+
+### Fixed
+- **Stale `_onlineVarRefs` Handle Auto-Eviction (`CodesysOnlineHelper`)**:
+  - Automatically releases and evicts stale `IOnlineVarRef` handles on `plc_login`, `plc_control("reset")`, and `"无效的变量引用"` / `"Invalid variable reference"` errors with transparent retry.
+- **Online `read_device_log` Reflection & UI-Thread Deadlock (`PlcTraceAndLoggerHelper.Logger`)**:
+  - Replaced `dynamic` calls on internal `ScriptOnline`/`ScriptOnlineDevice` with reflection and added WinForms message-pump waiting (`Application.DoEvents()`) around `BeginGetLoggerNames`/`BeginGetLoggerEntries`.
+- **Cross-Assembly Hot-Reload & PLC Logger Alignment (`ServerBootstrap`, `PlcTraceAndLoggerHelper`)** (#16, #17):
+  - Added `AppDomain` stop-action handoff in `ServerBootstrap` so `hot_reload_dll` cleanly stops prior pipe listeners, deterministic Roslyn builds, and aligned `FB_McpLogger` (`TickCycle`/`WriteLog`).
+
 ## [1.3.0] - 2026-11-15
 
 ### Added

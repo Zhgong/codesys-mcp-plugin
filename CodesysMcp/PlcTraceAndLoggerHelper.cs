@@ -3,9 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text;
+using System.Reflection;
 using System.Text.RegularExpressions;
-using System.Threading;
 using System.Xml;
 
 namespace CodesysMcp
@@ -38,158 +37,71 @@ namespace CodesysMcp
     {
         public bool success { get; set; }
         public int totalCyclesRecorded { get; set; }
+        public int returnedPointsCount { get; set; }
         public Dictionary<string, TraceChannelStats> channelStats { get; set; } = new Dictionary<string, TraceChannelStats>();
         public List<TraceTransition> transitions { get; set; } = new List<TraceTransition>();
         public List<TraceConditionMatch> conditionMatches { get; set; } = new List<TraceConditionMatch>();
+        public List<double> timestamps { get; set; }
+        public Dictionary<string, List<double>> series { get; set; }
+        public string exportedFilePath { get; set; }
         public string message { get; set; }
     }
 
-    public class PlcLogEntryDto
+    public class TraceTriggerConfigOptions
     {
-        public long seq { get; set; }
-        public long cycle { get; set; }
-        public string tag { get; set; }
-        public string msg { get; set; }
-        public float val1 { get; set; }
-        public float val2 { get; set; }
+        public bool? triggerEnabled { get; set; }
+        public string triggerVariable { get; set; }
+        public string triggerEdge { get; set; }
+        public object triggerLevel { get; set; }
+        public int? postTriggerSamples { get; set; }
+        public string recordCondition { get; set; }
+        public int? everyNCycles { get; set; }
+        public string taskName { get; set; }
+        public bool? autoStart { get; set; }
+
+        public bool HasAnyValue =>
+            triggerEnabled.HasValue ||
+            triggerVariable != null ||
+            !string.IsNullOrWhiteSpace(triggerEdge) ||
+            triggerLevel != null ||
+            postTriggerSamples.HasValue ||
+            recordCondition != null ||
+            everyNCycles.HasValue ||
+            !string.IsNullOrWhiteSpace(taskName) ||
+            autoStart.HasValue;
     }
 
-    public class PlcLoggerSetupResult
+    public class TraceControlResult
     {
         public bool success { get; set; }
-        public bool dutCreated { get; set; }
-        public bool fbCreated { get; set; }
-        public bool gvlCreated { get; set; }
-        public string sampleCode { get; set; }
+        public string traceName { get; set; }
+        public string action { get; set; }
+        public string packetStateBefore { get; set; }
+        public string triggerStateBefore { get; set; }
+        public string packetState { get; set; }
+        public string triggerState { get; set; }
+        public string taskName { get; set; }
+        public bool triggerEnabled { get; set; }
+        public string triggerVariable { get; set; }
+        public string triggerEdge { get; set; }
+        public string triggerLevel { get; set; }
+        public uint postTriggerSamples { get; set; }
+        public string recordCondition { get; set; }
+        public uint everyNCycles { get; set; }
+        public bool autoStart { get; set; }
         public string message { get; set; }
     }
 
-    public class PlcLogsResult
+    public static partial class PlcTraceAndLoggerHelper
     {
-        public bool success { get; set; }
-        public long currentPlcCycle { get; set; }
-        public long totalLogsWritten { get; set; }
-        public List<PlcLogEntryDto> entries { get; set; } = new List<PlcLogEntryDto>();
-        public string message { get; set; }
-    }
-
-        public class DeviceLogEntryDto
-    {
-        public DateTime timestamp { get; set; }
-        public string severity { get; set; }
-        public string component { get; set; }
-        public string user { get; set; }
-        public string infoId { get; set; }
-        public string message { get; set; }
-    }
-
-    public class DeviceLogResult
-    {
-        public bool success { get; set; }
-        public string source { get; set; }
-        public int totalEntries { get; set; }
-        public int infoCount { get; set; }
-        public int warningCount { get; set; }
-        public int errorCount { get; set; }
-        public int exceptionCount { get; set; }
-        public List<DeviceLogEntryDto> entries { get; set; } = new List<DeviceLogEntryDto>();
-        public string message { get; set; }
-    }
-
-    public class SetupDeviceLoggerResult
-    {
-        public bool success { get; set; }
-        public bool cmpLogReferenced { get; set; }
-        public bool fcCreated { get; set; }
-        public string sampleCall { get; set; }
-        public string message { get; set; }
-    }
-
-    public static class PlcTraceAndLoggerHelper
-    {
-        public static string GenerateLogEntryDutSource()
-        {
-            return @"TYPE ST_McpLogEntry :
-STRUCT
-    nSeq      : DINT;        // Global monotonic sequence number
-    nCycle    : UDINT;       // Precise PLC scan cycle counter
-    sTag      : STRING(31);  // Category tag (e.g. 'STATE', 'ERROR', 'PRESS')
-    sMsg      : STRING(79);  // Debug message description
-    rVal1     : REAL;        // Diagnostic value 1 (e.g. rDispPos)
-    rVal2     : REAL;        // Diagnostic value 2 (e.g. rForce)
-END_STRUCT
-END_TYPE";
-        }
-
-        public static (string declaration, string implementation) GenerateFbLoggerSource(int bufferSize = 64)
-        {
-            if (bufferSize <= 0) bufferSize = 64;
-            int maxIdx = bufferSize - 1;
-            string decl = $@"FUNCTION_BLOCK FB_McpLogger
-VAR_INPUT
-    bExecute       : BOOL := TRUE;
-    sTag           : STRING(31) := '';
-    sMsg           : STRING(79) := '';
-    rVal1          : REAL := 0.0;
-    rVal2          : REAL := 0.0;
-END_VAR
-VAR
-    aBuffer        : ARRAY[0..{maxIdx}] OF ST_McpLogEntry;
-    nWriteIdx      : INT := 0;
-    nTotalCount    : DINT := 0;
-    nCycleCounter  : UDINT := 0;
-    bClear         : BOOL := FALSE;
-    sLastTag       : STRING(31) := '';
-    sLastMsg       : STRING(79) := '';
-END_VAR";
-            string impl = $@"IF bClear THEN
-    nWriteIdx := 0;
-    nTotalCount := 0;
-    sLastTag := '';
-    sLastMsg := '';
-    bClear := FALSE;
-END_IF;
-nCycleCounter := nCycleCounter + 1;
-IF bExecute AND (sTag <> '' OR sMsg <> '') THEN
-    IF sTag <> sLastTag OR sMsg <> sLastMsg THEN
-        nTotalCount := nTotalCount + 1;
-        aBuffer[nWriteIdx].nSeq := nTotalCount;
-        aBuffer[nWriteIdx].nCycle := nCycleCounter;
-        aBuffer[nWriteIdx].sTag := sTag;
-        aBuffer[nWriteIdx].sMsg := sMsg;
-        aBuffer[nWriteIdx].rVal1 := rVal1;
-        aBuffer[nWriteIdx].rVal2 := rVal2;
-        nWriteIdx := (nWriteIdx + 1) MOD {bufferSize};
-        sLastTag := sTag;
-        sLastMsg := sMsg;
-    END_IF;
-END_IF;";
-            return (decl, impl);
-        }
-
-        public static string GenerateGvlLoggerSource()
-        {
-            return @"VAR_GLOBAL
-    McpLogger : FB_McpLogger;
-END_VAR";
-        }
-
-        public static List<PlcLogEntryDto> ReconstructRingBuffer(List<PlcLogEntryDto> rawEntries, long totalCount, string tagFilter = null, int lastN = 32)
-        {
-            if (rawEntries == null || rawEntries.Count == 0) return new List<PlcLogEntryDto>();
-            var valid = rawEntries.Where(e => e != null && e.seq > 0).OrderBy(e => e.seq).ToList();
-            if (!string.IsNullOrEmpty(tagFilter))
-            {
-                valid = valid.Where(e => string.Equals(e.tag, tagFilter, StringComparison.OrdinalIgnoreCase)).ToList();
-            }
-            if (lastN > 0 && valid.Count > lastN)
-            {
-                valid = valid.Skip(valid.Count - lastN).ToList();
-            }
-            return valid;
-        }
-
-        public static TraceAnalysisResult AnalyzeTraceCsvContent(string csvContent, double deadband = 0.01, string filterCondition = null)
+        public static TraceAnalysisResult AnalyzeTraceCsvContent(
+            string csvContent,
+            double deadband = 0.01,
+            string filterCondition = null,
+            bool includeSeries = false,
+            double? startMs = null,
+            double? endMs = null,
+            int maxPoints = 0)
         {
             var res = new TraceAnalysisResult { success = true };
             if (string.IsNullOrWhiteSpace(csvContent))
@@ -199,7 +111,6 @@ END_VAR";
             }
 
             using (var reader = new StringReader(csvContent))
-
             {
                 string line;
                 string headerLine = null;
@@ -229,24 +140,22 @@ END_VAR";
                     res.message = "CSV must have at least Time and one signal column.";
                     return res;
                 }
+
                 var headers = rawHeaders.Select(h => h.Trim().Trim('"', '\'')).ToArray();
                 var channelCols = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                var channelNames = new List<string>();
                 for (int i = 1; i < headers.Length; i++)
                 {
                     string name = headers[i];
-                    if (!string.IsNullOrEmpty(name))
+                    if (!string.IsNullOrEmpty(name) && !channelCols.ContainsKey(name))
                     {
                         channelCols[name] = i;
-                        res.channelStats[name] = new TraceChannelStats
-                        {
-                            variable = name,
-                            minValue = double.MaxValue,
-                            maxValue = double.MinValue
-                        };
+                        channelNames.Add(name);
                     }
                 }
-                Dictionary<string, string> prevSnapshot = null;
-                int cycleIdx = 0;
+
+                var allTimes = new List<double>();
+                var allRows = new List<Dictionary<string, string>>();
                 while ((line = reader.ReadLine()) != null)
                 {
                     if (string.IsNullOrWhiteSpace(line)) continue;
@@ -258,74 +167,34 @@ END_VAR";
                     var currentSnapshot = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var kvp in channelCols)
                     {
-                        string chName = kvp.Key;
-                        int colIdx = kvp.Value;
-                        string rawVal = parts[colIdx].Trim().Trim('"', '\'');
-                        currentSnapshot[chName] = rawVal;
-                        var stats = res.channelStats[chName];
-                        if (double.TryParse(rawVal, NumberStyles.Any, CultureInfo.InvariantCulture, out double numVal))
-                        {
-                            if (cycleIdx == 0) stats.initialValue = numVal;
-                            stats.finalValue = numVal;
-                            if (numVal < stats.minValue) stats.minValue = numVal;
-                            if (numVal > stats.maxValue) stats.maxValue = numVal;
-                        }
+                        currentSnapshot[kvp.Key] = parts[kvp.Value].Trim().Trim('"', '\'');
                     }
-
-                    // Compute transitions
-                    if (prevSnapshot != null)
-                    {
-                        foreach (var kvp in channelCols)
-                        {
-                            string chName = kvp.Key;
-                            string oldVal = prevSnapshot[chName];
-                            string newVal = currentSnapshot[chName];
-                            bool changed = false;
-                            if (double.TryParse(oldVal, NumberStyles.Any, CultureInfo.InvariantCulture, out double dOld) &&
-                                double.TryParse(newVal, NumberStyles.Any, CultureInfo.InvariantCulture, out double dNew))
-                            {
-                                if (Math.Abs(dOld - dNew) > deadband)
-                                {
-                                    changed = true;
-                                }
-                            }
-                            else if (!string.Equals(oldVal, newVal, StringComparison.OrdinalIgnoreCase))
-                            {
-                                changed = true;
-                            }
-                            if (changed)
-                            {
-                                res.channelStats[chName].changeCount++;
-                                res.transitions.Add(new TraceTransition
-                                {
-                                    timestampMs = timestampMs,
-                                    variable = chName,
-                                    oldValue = oldVal,
-                                    newValue = newVal
-                                });
-                            }
-                        }
-                    }
-
-                    // Condition matching
-                    if (!string.IsNullOrEmpty(filterCondition) && EvaluateFilterCondition(currentSnapshot, filterCondition))
-                    {
-                        res.conditionMatches.Add(new TraceConditionMatch
-                        {
-                            timestampMs = timestampMs,
-                            snapshot = new Dictionary<string, string>(currentSnapshot)
-                        });
-                    }
-                    prevSnapshot = currentSnapshot;
-                    cycleIdx++;
+                    allTimes.Add(timestampMs);
+                    allRows.Add(currentSnapshot);
                 }
-                res.totalCyclesRecorded = cycleIdx;
-                res.message = $"Successfully analyzed {cycleIdx} Trace cycles with {res.transitions.Count} transition(s).";
+
+                return BuildTraceAnalysisResult(
+                    allTimes,
+                    allRows,
+                    channelNames,
+                    deadband,
+                    filterCondition,
+                    includeSeries,
+                    startMs,
+                    endMs,
+                    maxPoints,
+                    sourceLabel: "Trace");
             }
-            return res;
         }
 
-        public static TraceAnalysisResult AnalyzeTraceXmlContent(string xmlContent, double deadband = 0.01, string filterCondition = null)
+        public static TraceAnalysisResult AnalyzeTraceXmlContent(
+            string xmlContent,
+            double deadband = 0.01,
+            string filterCondition = null,
+            bool includeSeries = false,
+            double? startMs = null,
+            double? endMs = null,
+            int maxPoints = 0)
         {
             if (string.IsNullOrWhiteSpace(xmlContent))
             {
@@ -333,10 +202,17 @@ END_VAR";
             }
             var doc = new XmlDocument();
             doc.LoadXml(xmlContent);
-            return AnalyzeTraceXmlDocument(doc, deadband, filterCondition);
+            return AnalyzeTraceXmlDocument(doc, deadband, filterCondition, includeSeries, startMs, endMs, maxPoints);
         }
 
-        public static TraceAnalysisResult AnalyzeTraceXmlDocument(XmlDocument doc, double deadband = 0.01, string filterCondition = null)
+        public static TraceAnalysisResult AnalyzeTraceXmlDocument(
+            XmlDocument doc,
+            double deadband = 0.01,
+            string filterCondition = null,
+            bool includeSeries = false,
+            double? startMs = null,
+            double? endMs = null,
+            int maxPoints = 0)
         {
             var res = new TraceAnalysisResult { success = true };
             if (doc == null)
@@ -350,6 +226,8 @@ END_VAR";
                 res.message = "No TraceVariable nodes found in XML.";
                 return res;
             }
+
+            var channelNames = new List<string>();
             var timeline = new SortedDictionary<double, Dictionary<string, string>>();
             foreach (XmlNode vNode in varNodes)
             {
@@ -357,14 +235,11 @@ END_VAR";
                 var tsNode = vNode.SelectSingleNode("Timestamps");
                 var valNode = vNode.SelectSingleNode("Values");
                 if (tsNode == null || valNode == null) continue;
+                if (!channelNames.Contains(varName)) channelNames.Add(varName);
+
                 string[] tsParts = tsNode.InnerText.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
                 string[] valParts = valNode.InnerText.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                res.channelStats[varName] = new TraceChannelStats
-                {
-                    variable = varName,
-                    minValue = double.MaxValue,
-                    maxValue = double.MinValue
-                };
+
                 bool isMicroseconds = false;
                 if (tsParts.Length >= 2 &&
                     double.TryParse(tsParts[0].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double t0) &&
@@ -372,6 +247,7 @@ END_VAR";
                 {
                     if (Math.Abs(t1 - t0) >= 500.0) isMicroseconds = true;
                 }
+
                 int count = Math.Min(tsParts.Length, valParts.Length);
                 for (int i = 0; i < count; i++)
                 {
@@ -387,33 +263,198 @@ END_VAR";
                         timeline[timeMs] = snap;
                     }
                     snap[varName] = valStr;
-                    var stats = res.channelStats[varName];
-                    if (double.TryParse(valStr, NumberStyles.Any, CultureInfo.InvariantCulture, out double numVal))
+                }
+            }
+
+            var allTimes = new List<double>(timeline.Count);
+            var allRows = new List<Dictionary<string, string>>(timeline.Count);
+            foreach (var kvp in timeline)
+            {
+                allTimes.Add(kvp.Key);
+                allRows.Add(kvp.Value);
+            }
+
+            return BuildTraceAnalysisResult(
+                allTimes,
+                allRows,
+                channelNames,
+                deadband,
+                filterCondition,
+                includeSeries,
+                startMs,
+                endMs,
+                maxPoints,
+                sourceLabel: "XML");
+        }
+
+        private static bool TryParseNumericSample(string rawVal, out double numVal)
+        {
+            if (string.IsNullOrWhiteSpace(rawVal))
+            {
+                numVal = 0.0;
+                return false;
+            }
+            string norm = CodesysOnlineHelper.NormalizeIecValue(rawVal);
+            if (double.TryParse(norm, NumberStyles.Any, CultureInfo.InvariantCulture, out numVal))
+            {
+                return !double.IsNaN(numVal) && !double.IsInfinity(numVal);
+            }
+            if (bool.TryParse(norm, out bool bVal))
+            {
+                numVal = bVal ? 1.0 : 0.0;
+                return true;
+            }
+            numVal = 0.0;
+            return false;
+        }
+
+        private static List<int> SelectDownsampledIndices(int totalCount, int maxPoints, ICollection<int> peakIndices)
+        {
+            if (totalCount <= 0) return new List<int>();
+            if (maxPoints <= 0 || totalCount <= maxPoints)
+            {
+                var all = new List<int>(totalCount);
+                for (int i = 0; i < totalCount; i++) all.Add(i);
+                return all;
+            }
+
+            if (maxPoints == 1)
+            {
+                return new List<int> { 0 };
+            }
+
+            var selected = new SortedSet<int> { 0, totalCount - 1 };
+            if (peakIndices != null)
+            {
+                foreach (int idx in peakIndices)
+                {
+                    if (selected.Count >= maxPoints) break;
+                    if (idx >= 0 && idx < totalCount)
                     {
-                        if (i == 0) stats.initialValue = numVal;
-                        stats.finalValue = numVal;
-                        if (numVal < stats.minValue) stats.minValue = numVal;
-                        if (numVal > stats.maxValue) stats.maxValue = numVal;
+                        selected.Add(idx);
                     }
                 }
             }
 
-            // Iterate timeline in chronological order
-            Dictionary<string, string> prevSnap = null;
-            int cycleCount = 0;
-            foreach (var kvp in timeline)
+            int remaining = maxPoints - selected.Count;
+            if (remaining > 0)
             {
-                double timeMs = kvp.Key;
-                var currSnap = kvp.Value;
+                double step = (double)(totalCount - 1) / (remaining + 1);
+                for (int k = 1; k <= remaining; k++)
+                {
+                    int candidate = (int)Math.Round(k * step);
+                    candidate = Math.Max(0, Math.Min(totalCount - 1, candidate));
+                    selected.Add(candidate);
+                }
+
+                for (int idx = 1; idx < totalCount - 1 && selected.Count < maxPoints; idx++)
+                {
+                    selected.Add(idx);
+                }
+            }
+
+            return new List<int>(selected);
+        }
+
+        private static TraceAnalysisResult BuildTraceAnalysisResult(
+            List<double> allTimes,
+            List<Dictionary<string, string>> allRows,
+            List<string> channelNames,
+            double deadband,
+            string filterCondition,
+            bool includeSeries,
+            double? startMs,
+            double? endMs,
+            int maxPoints,
+            string sourceLabel)
+        {
+            var res = new TraceAnalysisResult
+            {
+                success = true,
+                totalCyclesRecorded = allRows.Count
+            };
+
+            var filteredTimes = new List<double>();
+            var filteredRows = new List<Dictionary<string, string>>();
+            for (int i = 0; i < allRows.Count; i++)
+            {
+                double t = allTimes[i];
+                if (startMs.HasValue && t < startMs.Value) continue;
+                if (endMs.HasValue && t > endMs.Value) continue;
+                filteredTimes.Add(t);
+                filteredRows.Add(allRows[i]);
+            }
+
+            var minValMap = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            var maxValMap = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            var minIdxMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var maxIdxMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var hasNumMap = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var ch in channelNames)
+            {
+                res.channelStats[ch] = new TraceChannelStats { variable = ch };
+                minValMap[ch] = double.MaxValue;
+                maxValMap[ch] = double.MinValue;
+                minIdxMap[ch] = -1;
+                maxIdxMap[ch] = -1;
+                hasNumMap[ch] = false;
+            }
+
+            var numericSeriesRows = includeSeries ? new Dictionary<string, List<double>>(StringComparer.OrdinalIgnoreCase) : null;
+            if (includeSeries)
+            {
+                foreach (var ch in channelNames)
+                {
+                    numericSeriesRows[ch] = new List<double>(filteredRows.Count);
+                }
+            }
+
+            Dictionary<string, string> prevSnap = null;
+            for (int i = 0; i < filteredRows.Count; i++)
+            {
+                double timeMs = filteredTimes[i];
+                var currSnap = filteredRows[i];
+
+                foreach (var ch in channelNames)
+                {
+                    currSnap.TryGetValue(ch, out string rawVal);
+                    bool parsedNum = TryParseNumericSample(rawVal, out double numVal);
+                    if (parsedNum)
+                    {
+                        var stats = res.channelStats[ch];
+                        if (!hasNumMap[ch])
+                        {
+                            stats.initialValue = numVal;
+                            hasNumMap[ch] = true;
+                        }
+                        stats.finalValue = numVal;
+                        if (numVal < minValMap[ch])
+                        {
+                            minValMap[ch] = numVal;
+                            minIdxMap[ch] = i;
+                        }
+                        if (numVal > maxValMap[ch])
+                        {
+                            maxValMap[ch] = numVal;
+                            maxIdxMap[ch] = i;
+                        }
+                    }
+
+                    if (includeSeries)
+                    {
+                        numericSeriesRows[ch].Add(parsedNum ? numVal : 0.0);
+                    }
+                }
+
                 if (prevSnap != null)
                 {
-                    foreach (var ch in res.channelStats.Keys)
+                    foreach (var ch in channelNames)
                     {
                         if (prevSnap.TryGetValue(ch, out string oldVal) && currSnap.TryGetValue(ch, out string newVal))
                         {
                             bool changed = false;
-                            if (double.TryParse(oldVal, NumberStyles.Any, CultureInfo.InvariantCulture, out double dOld) &&
-                                double.TryParse(newVal, NumberStyles.Any, CultureInfo.InvariantCulture, out double dNew))
+                            if (TryParseNumericSample(oldVal, out double dOld) && TryParseNumericSample(newVal, out double dNew))
                             {
                                 if (Math.Abs(dOld - dNew) > deadband) changed = true;
                             }
@@ -435,6 +476,7 @@ END_VAR";
                         }
                     }
                 }
+
                 if (!string.IsNullOrEmpty(filterCondition) && EvaluateFilterCondition(currSnap, filterCondition))
                 {
                     res.conditionMatches.Add(new TraceConditionMatch
@@ -443,16 +485,656 @@ END_VAR";
                         snapshot = new Dictionary<string, string>(currSnap)
                     });
                 }
+
                 prevSnap = currSnap;
-                cycleCount++;
             }
-            res.totalCyclesRecorded = cycleCount;
-            res.message = $"Successfully analyzed {cycleCount} XML cycles with {res.transitions.Count} transition(s).";
+
+            foreach (var ch in channelNames)
+            {
+                if (hasNumMap[ch])
+                {
+                    res.channelStats[ch].minValue = minValMap[ch];
+                    res.channelStats[ch].maxValue = maxValMap[ch];
+                }
+            }
+
+            if (includeSeries)
+            {
+                var peakIndices = new List<int>();
+                foreach (var ch in channelNames)
+                {
+                    if (minIdxMap[ch] >= 0) peakIndices.Add(minIdxMap[ch]);
+                    if (maxIdxMap[ch] >= 0) peakIndices.Add(maxIdxMap[ch]);
+                }
+
+                var selectedIndices = SelectDownsampledIndices(filteredTimes.Count, maxPoints, peakIndices);
+                res.timestamps = new List<double>(selectedIndices.Count);
+                res.series = new Dictionary<string, List<double>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var ch in channelNames)
+                {
+                    res.series[ch] = new List<double>(selectedIndices.Count);
+                }
+
+                foreach (int idx in selectedIndices)
+                {
+                    res.timestamps.Add(filteredTimes[idx]);
+                    foreach (var ch in channelNames)
+                    {
+                        res.series[ch].Add(numericSeriesRows[ch][idx]);
+                    }
+                }
+                res.returnedPointsCount = res.timestamps.Count;
+            }
+            else
+            {
+                res.returnedPointsCount = filteredTimes.Count;
+            }
+
+            res.message = $"Successfully analyzed {filteredTimes.Count} {sourceLabel} cycles (of {allRows.Count} total) with {res.transitions.Count} transition(s).";
             return res;
         }
 
-        public static TraceAnalysisResult AnalyzeTraceFile(string filePath, double deadband = 0.01, string filterCondition = null)
+        private static object FindTraceExtension(string traceName)
         {
+            string targetName = string.IsNullOrWhiteSpace(traceName) ? "Trace" : traceName.Trim();
+            var tObj = CodesysOperations.FindObjectByName(targetName);
+            if (tObj == null)
+                throw new FileNotFoundException($"Trace object '{targetName}' not found in active project.");
+
+            object traceExt = null;
+            var extProp = tObj.GetType().GetProperty("Extensions");
+            var exts = extProp?.GetValue(tObj, null) as System.Collections.IEnumerable;
+            if (exts != null)
+            {
+                foreach (var item in exts)
+                {
+                    if (item != null && item.GetType().Name.Contains("TraceObject"))
+                    {
+                        traceExt = item;
+                        break;
+                    }
+                }
+            }
+            if (traceExt == null)
+                throw new InvalidOperationException($"ScriptTraceObject extension not found on Trace '{targetName}'.");
+
+            return traceExt;
+        }
+
+        private static object OpenTraceEditor(string traceName, out object traceExt)
+        {
+            string targetName = string.IsNullOrWhiteSpace(traceName) ? "Trace" : traceName.Trim();
+            traceExt = FindTraceExtension(targetName);
+
+            var openEditorMethod = traceExt.GetType().GetMethod("open_editor", BindingFlags.Public | BindingFlags.Instance);
+            if (openEditorMethod == null)
+                throw new InvalidOperationException("Method 'open_editor' not found on ScriptTraceObject.");
+
+            object editorObj = openEditorMethod.Invoke(traceExt, null);
+            if (editorObj == null)
+                throw new InvalidOperationException($"Failed to open trace editor for '{targetName}'.");
+
+            return editorObj;
+        }
+
+        private static object OpenTraceEditor(string traceName)
+        {
+            return OpenTraceEditor(traceName, out _);
+        }
+
+        private static void SetTraceProperty(object traceExt, string propName, object value)
+        {
+            var prop = traceExt.GetType().GetProperty(propName, BindingFlags.Public | BindingFlags.Instance);
+            if (prop == null || !prop.CanWrite) return;
+            prop.SetValue(traceExt, value, null);
+        }
+
+        private static object GetTraceProperty(object traceExt, string propName)
+        {
+            if (traceExt == null) return null;
+            try
+            {
+                var prop = traceExt.GetType().GetProperty(propName, BindingFlags.Public | BindingFlags.Instance);
+                return prop != null && prop.CanRead ? prop.GetValue(traceExt, null) : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public static void PopulateTraceConfiguration(object traceExt, TraceControlResult res)
+        {
+            if (traceExt == null || res == null) return;
+            res.taskName = GetTraceProperty(traceExt, "task_name")?.ToString();
+            object enVal = GetTraceProperty(traceExt, "trigger_enabled");
+            if (enVal != null) res.triggerEnabled = Convert.ToBoolean(enVal);
+            res.triggerVariable = GetTraceProperty(traceExt, "trigger_variable")?.ToString();
+            res.triggerEdge = GetTraceProperty(traceExt, "trigger_edge")?.ToString();
+            object lvlVal = GetTraceProperty(traceExt, "trigger_level");
+            res.triggerLevel = lvlVal != null ? Convert.ToString(lvlVal, CultureInfo.InvariantCulture) : null;
+            object postVal = GetTraceProperty(traceExt, "post_trigger_samples");
+            if (postVal != null) res.postTriggerSamples = Convert.ToUInt32(postVal);
+            res.recordCondition = GetTraceProperty(traceExt, "record_condition")?.ToString();
+            object everyVal = GetTraceProperty(traceExt, "every_n_cycles");
+            if (everyVal != null) res.everyNCycles = Convert.ToUInt32(everyVal);
+            object autoVal = GetTraceProperty(traceExt, "auto_start");
+            if (autoVal != null) res.autoStart = Convert.ToBoolean(autoVal);
+        }
+
+        public static void ApplyTraceTriggerConfiguration(object traceExt, TraceTriggerConfigOptions options)
+        {
+            if (traceExt == null || options == null) return;
+
+            if (!string.IsNullOrWhiteSpace(options.taskName))
+                SetTraceProperty(traceExt, "task_name", options.taskName.Trim());
+
+            if (options.triggerVariable != null)
+                SetTraceProperty(traceExt, "trigger_variable", options.triggerVariable.Trim());
+
+            if (options.triggerEnabled.HasValue)
+            {
+                SetTraceProperty(traceExt, "trigger_enabled", options.triggerEnabled.Value);
+            }
+            else if (!string.IsNullOrWhiteSpace(options.triggerVariable))
+            {
+                SetTraceProperty(traceExt, "trigger_enabled", true);
+            }
+
+            if (!string.IsNullOrWhiteSpace(options.triggerEdge))
+            {
+                string normEdge = options.triggerEdge.Trim();
+                if (normEdge.Equals("rising", StringComparison.OrdinalIgnoreCase)) normEdge = "Positive";
+                else if (normEdge.Equals("falling", StringComparison.OrdinalIgnoreCase)) normEdge = "Negative";
+
+                var edgeProp = traceExt.GetType().GetProperty("trigger_edge", BindingFlags.Public | BindingFlags.Instance);
+                if (edgeProp != null && edgeProp.CanWrite)
+                {
+                    if (edgeProp.PropertyType.IsEnum)
+                    {
+                        try
+                        {
+                            object parsed = Enum.Parse(edgeProp.PropertyType, normEdge, ignoreCase: true);
+                            if (!Enum.IsDefined(edgeProp.PropertyType, parsed))
+                                throw new ArgumentException($"Undefined enum value '{options.triggerEdge}'.");
+                            edgeProp.SetValue(traceExt, parsed, null);
+                        }
+                        catch (Exception ex) when (!(ex is TargetInvocationException))
+                        {
+                            throw new ArgumentException($"Invalid trigger_edge '{options.triggerEdge}'. Valid values: positive, negative, both, undefined.");
+                        }
+                    }
+                    else
+                    {
+                        edgeProp.SetValue(traceExt, normEdge, null);
+                    }
+                }
+            }
+
+            if (options.triggerLevel != null)
+            {
+                var lvlProp = traceExt.GetType().GetProperty("trigger_level", BindingFlags.Public | BindingFlags.Instance);
+                if (lvlProp != null && lvlProp.CanWrite)
+                {
+                    string rawStr = options.triggerLevel.ToString().Trim();
+                    if (string.IsNullOrEmpty(rawStr))
+                    {
+                        lvlProp.SetValue(traceExt, null, null);
+                    }
+                    else
+                    {
+                        object typedVal = rawStr;
+                        if (int.TryParse(rawStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int iVal))
+                            typedVal = iVal;
+                        else if (double.TryParse(rawStr, NumberStyles.Any, CultureInfo.InvariantCulture, out double dVal))
+                            typedVal = dVal;
+                        else if (bool.TryParse(rawStr, out bool bVal))
+                            typedVal = bVal;
+
+                        try
+                        {
+                            lvlProp.SetValue(traceExt, typedVal, null);
+                        }
+                        catch
+                        {
+                            lvlProp.SetValue(traceExt, rawStr, null);
+                        }
+                    }
+                }
+            }
+
+            if (options.postTriggerSamples.HasValue)
+                SetTraceProperty(traceExt, "post_trigger_samples", Convert.ToUInt32(Math.Max(0, options.postTriggerSamples.Value)));
+
+            if (options.recordCondition != null)
+                SetTraceProperty(traceExt, "record_condition", options.recordCondition.Trim());
+
+            if (options.everyNCycles.HasValue && options.everyNCycles.Value > 0)
+                SetTraceProperty(traceExt, "every_n_cycles", Convert.ToUInt32(options.everyNCycles.Value));
+
+            if (options.autoStart.HasValue)
+                SetTraceProperty(traceExt, "auto_start", options.autoStart.Value);
+        }
+
+        private static string ReadTraceEditorState(object editorObj, string methodName)
+        {
+            if (editorObj == null) return "Unknown";
+            try
+            {
+                var m = editorObj.GetType().GetMethod(methodName, BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                var val = m?.Invoke(editorObj, null);
+                return val?.ToString() ?? "Unknown";
+            }
+            catch
+            {
+                return "Unknown";
+            }
+        }
+
+        public static bool TryDeleteExistingOnlineTracePacket(object editorObj, string fallbackPacketName = null)
+        {
+            if (editorObj == null) return false;
+            try
+            {
+                var viewField = editorObj.GetType().GetField("_view", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                object view = viewField?.GetValue(editorObj);
+                if (view == null) return false;
+
+                object manager = null;
+                var mgrProp = view.GetType().GetProperty("Manager", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (mgrProp != null) manager = mgrProp.GetValue(view, null);
+                if (manager == null)
+                {
+                    var getMgr = view.GetType().GetMethod("get_Manager", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+                    if (getMgr != null) manager = getMgr.Invoke(view, null);
+                }
+                if (manager == null)
+                {
+                    var mgrField = view.GetType().GetField("_tmManager", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (mgrField != null) manager = mgrField.GetValue(view);
+                }
+                if (manager == null) return false;
+
+                var isOnlineMethod = manager.GetType().GetMethod("IsPacketOnline", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+                if (isOnlineMethod == null) return false;
+                object isOnlineObj = isOnlineMethod.Invoke(manager, null);
+                bool isOnline = isOnlineObj != null && Convert.ToBoolean(isOnlineObj);
+                if (!isOnline) return false;
+
+                string packetName = null;
+                var pktProp = manager.GetType().GetProperty("PacketName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (pktProp != null) packetName = pktProp.GetValue(manager, null)?.ToString();
+                if (string.IsNullOrEmpty(packetName))
+                {
+                    var getPkt = manager.GetType().GetMethod("get_PacketName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+                    if (getPkt != null) packetName = getPkt.Invoke(manager, null)?.ToString();
+                }
+                if (string.IsNullOrEmpty(packetName)) packetName = fallbackPacketName;
+                if (string.IsNullOrEmpty(packetName)) return false;
+
+                var delMethod = manager.GetType().GetMethod("DeletePacket", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(string) }, null);
+                if (delMethod == null) return false;
+                delMethod.Invoke(manager, new object[] { packetName });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void EnsureTraceOverwritePromptSuppressed()
+        {
+            try
+            {
+                object sysObj = CodesysContext.RawSystem;
+                if (sysObj == null) return;
+                var answersProp = sysObj.GetType().GetProperty("prompt_answers", BindingFlags.Instance | BindingFlags.Public);
+                var dict = answersProp?.GetValue(sysObj, null) as System.Collections.IDictionary;
+                if (dict == null) return;
+
+                Type promptResultType = null;
+                if (answersProp.PropertyType.IsGenericType)
+                {
+                    var genArgs = answersProp.PropertyType.GetGenericArguments();
+                    if (genArgs.Length == 2 && genArgs[1].IsEnum) promptResultType = genArgs[1];
+                }
+                if (promptResultType == null)
+                {
+                    foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        promptResultType = asm.GetType("_3S.CoDeSys.Core.PromptResult", false);
+                        if (promptResultType != null && promptResultType.IsEnum) break;
+                    }
+                }
+                if (promptResultType == null || !promptResultType.IsEnum) return;
+
+                object okVal = null;
+                if (Enum.IsDefined(promptResultType, "OK")) okVal = Enum.Parse(promptResultType, "OK");
+                else if (Enum.IsDefined(promptResultType, "Yes")) okVal = Enum.Parse(promptResultType, "Yes");
+                if (okVal != null)
+                {
+                    dict["Strings.OverwriteExistingOnlineTrace"] = okVal;
+                }
+            }
+            catch { }
+        }
+
+        private static void PumpTraceUiEvents(object editorObj, string act, string packetBefore)
+        {
+            try
+            {
+                var forms = System.Windows.Forms.Application.OpenForms;
+                if (forms != null && forms.Count > 0 && !forms[0].InvokeRequired)
+                {
+                    for (int i = 0; i < 8; i++)
+                    {
+                        System.Windows.Forms.Application.DoEvents();
+                        string curP = ReadTraceEditorState(editorObj, "get_packet_state");
+                        if ((act == "stop" && string.Equals(curP, "Stopped", StringComparison.OrdinalIgnoreCase)) ||
+                            ((act == "start" || act == "download") && string.Equals(curP, "Started", StringComparison.OrdinalIgnoreCase)) ||
+                            (!string.Equals(curP, packetBefore, StringComparison.OrdinalIgnoreCase) && !string.Equals(curP, "NoConfig", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            break;
+                        }
+                        System.Threading.Thread.Sleep(25);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public static TraceControlResult ExecuteTraceControlOnEditor(
+            object editorObj,
+            string traceName,
+            string action,
+            object traceExt = null,
+            TraceTriggerConfigOptions triggerOptions = null)
+        {
+            string name = string.IsNullOrWhiteSpace(traceName) ? "Trace" : traceName.Trim();
+            string act = (action ?? "status").Trim().ToLowerInvariant();
+            if (editorObj == null)
+            {
+                return new TraceControlResult
+                {
+                    success = false,
+                    traceName = name,
+                    action = act,
+                    message = "Trace editor object is null."
+                };
+            }
+
+            string packetBefore = ReadTraceEditorState(editorObj, "get_packet_state");
+            string triggerBefore = ReadTraceEditorState(editorObj, "get_trigger_state");
+
+            string methodToInvoke = null;
+            switch (act)
+            {
+                case "status":
+                case "configure":
+                    break;
+                case "download":
+                    methodToInvoke = "download";
+                    break;
+                case "start":
+                    if (!string.Equals(packetBefore, "Started", StringComparison.OrdinalIgnoreCase))
+                        methodToInvoke = "start";
+                    break;
+                case "stop":
+                    if (!string.Equals(packetBefore, "Stopped", StringComparison.OrdinalIgnoreCase))
+                        methodToInvoke = "stop";
+                    break;
+                case "reset_trigger":
+                    methodToInvoke = "reset_trigger";
+                    break;
+                default:
+                    var invalidRes = new TraceControlResult
+                    {
+                        success = false,
+                        traceName = name,
+                        action = act,
+                        packetStateBefore = packetBefore,
+                        triggerStateBefore = triggerBefore,
+                        packetState = packetBefore,
+                        triggerState = triggerBefore,
+                        message = $"Unsupported trace action '{action}'. Valid actions: status, configure, download, start, stop, reset_trigger."
+                    };
+                    PopulateTraceConfiguration(traceExt, invalidRes);
+                    return invalidRes;
+            }
+
+            if (triggerOptions != null && triggerOptions.HasAnyValue)
+            {
+                if (traceExt == null)
+                {
+                    return new TraceControlResult
+                    {
+                        success = false,
+                        traceName = name,
+                        action = act,
+                        packetStateBefore = packetBefore,
+                        triggerStateBefore = triggerBefore,
+                        packetState = packetBefore,
+                        triggerState = triggerBefore,
+                        message = "ScriptTraceObject extension is required to apply trigger configuration."
+                    };
+                }
+
+                // Stop an actively running trace before mutating trigger configuration to avoid runtime lock errors
+                if (string.Equals(packetBefore, "Started", StringComparison.OrdinalIgnoreCase) &&
+                    (act == "configure" || act == "download"))
+                {
+                    try
+                    {
+                        var stopMethod = editorObj.GetType().GetMethod("stop", BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                        stopMethod?.Invoke(editorObj, null);
+                        PumpTraceUiEvents(editorObj, "stop", packetBefore);
+                    }
+                    catch { }
+                }
+
+                try
+                {
+                    ApplyTraceTriggerConfiguration(traceExt, triggerOptions);
+                }
+                catch (Exception ex)
+                {
+                    var inner = ex is TargetInvocationException && ex.InnerException != null ? ex.InnerException : ex;
+                    var cfgErr = new TraceControlResult
+                    {
+                        success = false,
+                        traceName = name,
+                        action = act,
+                        packetStateBefore = packetBefore,
+                        triggerStateBefore = triggerBefore,
+                        packetState = ReadTraceEditorState(editorObj, "get_packet_state"),
+                        triggerState = ReadTraceEditorState(editorObj, "get_trigger_state"),
+                        message = $"Failed to apply trace configuration: {inner.Message}"
+                    };
+                    PopulateTraceConfiguration(traceExt, cfgErr);
+                    return cfgErr;
+                }
+            }
+
+            if (methodToInvoke != null)
+            {
+                var m = editorObj.GetType().GetMethod(methodToInvoke, BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                if (m == null)
+                {
+                    var noMethodRes = new TraceControlResult
+                    {
+                        success = false,
+                        traceName = name,
+                        action = act,
+                        packetStateBefore = packetBefore,
+                        triggerStateBefore = triggerBefore,
+                        packetState = packetBefore,
+                        triggerState = triggerBefore,
+                        message = $"Method '{methodToInvoke}' not found on ScriptTraceEditorObject."
+                    };
+                    PopulateTraceConfiguration(traceExt, noMethodRes);
+                    return noMethodRes;
+                }
+
+                try
+                {
+                    if (act == "download")
+                    {
+                        EnsureTraceOverwritePromptSuppressed();
+                        TryDeleteExistingOnlineTracePacket(editorObj, name);
+                        using (CodesysContext.RawSystem != null
+                            ? new DeviceLogonWatchdog(DeviceLogonWatchdog.GetCurrentThreadId(), null, null, confirmGenericPrompts: true)
+                            : null)
+                        {
+                            m.Invoke(editorObj, null);
+                        }
+                    }
+                    else
+                    {
+                        m.Invoke(editorObj, null);
+                    }
+                    PumpTraceUiEvents(editorObj, act, packetBefore);
+                }
+                catch (Exception ex)
+                {
+                    var inner = ex is TargetInvocationException && ex.InnerException != null ? ex.InnerException : ex;
+                    string curPacket = ReadTraceEditorState(editorObj, "get_packet_state");
+                    string curTrigger = ReadTraceEditorState(editorObj, "get_trigger_state");
+                    var errRes = new TraceControlResult
+                    {
+                        success = false,
+                        traceName = name,
+                        action = act,
+                        packetStateBefore = packetBefore,
+                        triggerStateBefore = triggerBefore,
+                        packetState = curPacket,
+                        triggerState = curTrigger,
+                        message = $"Trace action '{act}' failed (PacketState={curPacket}, TriggerState={curTrigger}): {inner.Message}"
+                    };
+                    PopulateTraceConfiguration(traceExt, errRes);
+                    return errRes;
+                }
+            }
+
+            string packetAfter = ReadTraceEditorState(editorObj, "get_packet_state");
+            string triggerAfter = ReadTraceEditorState(editorObj, "get_trigger_state");
+            var okRes = new TraceControlResult
+            {
+                success = true,
+                traceName = name,
+                action = act,
+                packetStateBefore = packetBefore,
+                triggerStateBefore = triggerBefore,
+                packetState = packetAfter,
+                triggerState = triggerAfter,
+                message = $"Trace '{name}' action '{act}' completed (PacketState: {packetBefore} -> {packetAfter}, TriggerState: {triggerBefore} -> {triggerAfter})."
+            };
+            PopulateTraceConfiguration(traceExt, okRes);
+            return okRes;
+        }
+
+        public static TraceControlResult ControlTrace(
+            string traceName = "Trace",
+            string action = "status",
+            TraceTriggerConfigOptions triggerOptions = null)
+        {
+            string name = string.IsNullOrWhiteSpace(traceName) ? "Trace" : traceName.Trim();
+            string act = (action ?? "status").Trim().ToLowerInvariant();
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                if (CodesysContext.PrimaryProject == null)
+                {
+                    return new TraceControlResult
+                    {
+                        success = false,
+                        traceName = name,
+                        action = act,
+                        message = "Cannot control Trace when no CODESYS project is open."
+                    };
+                }
+
+                try
+                {
+                    CodesysOnlineHelper.EnsureExecutionStack();
+                    object traceExt;
+                    object editorObj = OpenTraceEditor(name, out traceExt);
+                    var res = ExecuteTraceControlOnEditor(editorObj, name, act, traceExt, triggerOptions);
+                    CodesysContext.LogToIde($"[TRACE] control_trace({name}, {act}) -> success={res.success}, packet={res.packetState}, trigger={res.triggerState}");
+                    return res;
+                }
+                catch (Exception ex)
+                {
+                    var inner = ex is TargetInvocationException && ex.InnerException != null ? ex.InnerException : ex;
+                    return new TraceControlResult
+                    {
+                        success = false,
+                        traceName = name,
+                        action = act,
+                        message = $"Failed to control trace '{name}': {inner.Message}"
+                    };
+                }
+            });
+        }
+
+        private static string TryExportLiveTraceToFile(string traceName, string targetFilePath)
+        {
+            if (string.IsNullOrWhiteSpace(traceName)) return null;
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                CodesysOnlineHelper.EnsureExecutionStack();
+                object editorObj = OpenTraceEditor(traceName);
+
+                var saveMethod = editorObj.GetType().GetMethod("save", new Type[] { typeof(string) });
+                if (saveMethod == null)
+                    throw new InvalidOperationException("Method 'save(string)' not found on ScriptTraceEditorObject.");
+
+                string safeName = string.Join("_", traceName.Split(Path.GetInvalidFileNameChars()));
+                string outPath = !string.IsNullOrWhiteSpace(targetFilePath)
+                    ? targetFilePath
+                    : Path.Combine(Path.GetTempPath(), $"codesys_trace_{safeName}.trace");
+
+                string dir = Path.GetDirectoryName(outPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                saveMethod.Invoke(editorObj, new object[] { outPath });
+                return outPath;
+            });
+        }
+
+        public static TraceAnalysisResult AnalyzeTraceFile(
+            string filePath,
+            double deadband = 0.01,
+            string filterCondition = null,
+            bool includeSeries = false,
+            double? startMs = null,
+            double? endMs = null,
+            int maxPoints = 0,
+            string traceName = null)
+        {
+            string exportedPath = null;
+            if ((string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) && !string.IsNullOrWhiteSpace(traceName))
+            {
+                try
+                {
+                    exportedPath = TryExportLiveTraceToFile(traceName.Trim(), filePath);
+                    if (!string.IsNullOrEmpty(exportedPath))
+                    {
+                        filePath = exportedPath;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    return new TraceAnalysisResult
+                    {
+                        success = false,
+                        message = $"Failed to export live trace '{traceName}': {ex.InnerException?.Message ?? ex.Message}"
+                    };
+                }
+            }
+
             var res = new TraceAnalysisResult { success = false };
             if (string.IsNullOrWhiteSpace(filePath))
             {
@@ -466,37 +1148,46 @@ END_VAR";
             }
             try
             {
+                TraceAnalysisResult analyzed;
                 string ext = Path.GetExtension(filePath)?.ToLowerInvariant();
                 if (ext == ".trace" || ext == ".xml")
                 {
                     var doc = new XmlDocument();
                     doc.Load(filePath);
-                    return AnalyzeTraceXmlDocument(doc, deadband, filterCondition);
+                    analyzed = AnalyzeTraceXmlDocument(doc, deadband, filterCondition, includeSeries, startMs, endMs, maxPoints);
                 }
                 else if (ext == ".csv")
                 {
                     string csv = File.ReadAllText(filePath);
-                    return AnalyzeTraceCsvContent(csv, deadband, filterCondition);
+                    analyzed = AnalyzeTraceCsvContent(csv, deadband, filterCondition, includeSeries, startMs, endMs, maxPoints);
                 }
                 else
                 {
-                    // Auto-detect format by checking leading character
+                    bool looksXml = false;
                     using (var reader = new StreamReader(filePath))
-
                     {
                         int ch;
                         while ((ch = reader.Read()) != -1 && char.IsWhiteSpace((char)ch)) { }
-                        if (ch == '<')
-                        {
-                            reader.BaseStream.Seek(0, SeekOrigin.Begin);
-                            var doc = new XmlDocument();
-                            doc.Load(reader);
-                            return AnalyzeTraceXmlDocument(doc, deadband, filterCondition);
-                        }
+                        if (ch == '<') looksXml = true;
                     }
-                    string csv = File.ReadAllText(filePath);
-                    return AnalyzeTraceCsvContent(csv, deadband, filterCondition);
+                    if (looksXml)
+                    {
+                        var doc = new XmlDocument();
+                        doc.Load(filePath);
+                        analyzed = AnalyzeTraceXmlDocument(doc, deadband, filterCondition, includeSeries, startMs, endMs, maxPoints);
+                    }
+                    else
+                    {
+                        string csv = File.ReadAllText(filePath);
+                        analyzed = AnalyzeTraceCsvContent(csv, deadband, filterCondition, includeSeries, startMs, endMs, maxPoints);
+                    }
                 }
+
+                if (!string.IsNullOrEmpty(exportedPath))
+                {
+                    analyzed.exportedFilePath = exportedPath;
+                }
+                return analyzed;
             }
             catch (Exception ex)
             {
@@ -511,7 +1202,6 @@ END_VAR";
         private static bool EvaluateFilterCondition(Dictionary<string, string> snapshot, string condition)
         {
             if (string.IsNullOrWhiteSpace(condition)) return false;
-            // Matches e.g. "rForce >= 5000" or "eState == 20"
             var m = Regex.Match(condition.Trim(), @"^([a-zA-Z0-9_\.]+)\s*(>=|<=|>|<|==|!=|=)\s*(.+)$");
             if (!m.Success) return false;
             string key = m.Groups[1].Value.Trim();
@@ -536,10 +1226,10 @@ END_VAR";
                 {
                     case ">=": return dActual >= dTarget;
                     case "<=": return dActual <= dTarget;
-                    case ">":  return dActual > dTarget;
-                    case "<":  return dActual < dTarget;
+                    case ">": return dActual > dTarget;
+                    case "<": return dActual < dTarget;
                     case "==":
-                    case "=":  return Math.Abs(dActual - dTarget) < 0.0001;
+                    case "=": return Math.Abs(dActual - dTarget) < 0.0001;
                     case "!=": return Math.Abs(dActual - dTarget) >= 0.0001;
                 }
             }
@@ -559,607 +1249,6 @@ END_VAR";
                 success = false,
                 message = "Trace file path must be provided for offline analysis."
             };
-        }
-
-        public static PlcLoggerSetupResult SetupPlcLoggerOfflineSafe()
-        {
-            return new PlcLoggerSetupResult
-            {
-                success = false,
-                message = "Cannot setup PLC logger when no CODESYS project is open."
-            };
-        }
-
-        public static PlcLogsResult ReadPlcLogsOfflineSafe()
-        {
-            return new PlcLogsResult
-            {
-                success = false,
-                message = "Cannot read PLC logs when no CODESYS project or online session is active."
-            };
-        }
-
-        public static PlcLoggerSetupResult SetupPlcLogger(int bufferSize = 64, string autoInjectPou = null)
-        {
-            return CodesysContext.RunOnPrimaryThread(() =>
-            {
-                var proj = CodesysContext.PrimaryProject;
-                if (proj == null) return SetupPlcLoggerOfflineSafe();
-                var res = new PlcLoggerSetupResult();
-                // 1. Ensure ST_McpLogEntry DUT exists
-                var existingDut = CodesysOperations.FindObjectByName("ST_McpLogEntry");
-                if (existingDut == null)
-                {
-                    CodesysOperations.WritePou("ST_McpLogEntry", GenerateLogEntryDutSource(), null, "DUT");
-                    res.dutCreated = true;
-                }
-
-                // 2. Ensure FB_McpLogger FB exists
-                var existingFb = CodesysOperations.FindObjectByName("FB_McpLogger");
-                if (existingFb == null)
-                {
-                    var (decl, impl) = GenerateFbLoggerSource(bufferSize);
-                    CodesysOperations.WritePou("FB_McpLogger", decl, impl, "FunctionBlock");
-                    res.fbCreated = true;
-                }
-
-                // 3. Ensure GVL_McpLogger GVL exists
-                var existingGvl = CodesysOperations.FindObjectByName("GVL_McpLogger");
-                if (existingGvl == null)
-                {
-                    CodesysOperations.WritePou("GVL_McpLogger", GenerateGvlLoggerSource(), null, "GVL");
-                    res.gvlCreated = true;
-                }
-
-                // 4. Optionally inject TickCycle into specified POU
-                if (!string.IsNullOrEmpty(autoInjectPou))
-                {
-                    try
-                    {
-                        var pouContent = CodesysOperations.ReadPou(autoInjectPou);
-                        string impl = pouContent.implementation ?? "";
-                        if (!impl.Contains("GVL_McpLogger.McpLogger.TickCycle"))
-                        {
-                            string newImpl = "GVL_McpLogger.McpLogger.TickCycle();\r\n" + impl;
-                            CodesysOperations.WritePou(autoInjectPou, pouContent.declaration, newImpl, "Program");
-                        }
-                    }
-                    catch { }
-                }
-                res.success = true;
-                res.sampleCode = "GVL_McpLogger.McpLogger.Log(sTag := 'STATE_20', sMsg := 'Workpiece contact reached', rVal1 := rDispPos, rVal2 := rForce);";
-                res.message = "PLC In-Memory Logger components (ST_McpLogEntry, FB_McpLogger, GVL_McpLogger) are ready.";
-                return res;
-            });
-        }
-
-        public static (string declaration, string implementation) GenerateLogMsgFunctionSource()
-        {
-            string decl = @"FUNCTION FC_LogMsg : BOOL
-VAR_INPUT
-    sMsg    : STRING(255);
-    nLevel  : INT := 1; // 1: INFO, 2: WARNING, 3: ERROR
-END_VAR
-VAR
-    udiClassID : UDINT;
-END_VAR";
-            string impl = @"CASE nLevel OF
-    2: udiClassID := 16#00000002; // LOG_WARNING
-    3: udiClassID := 16#00000004; // LOG_ERROR
-ELSE
-    udiClassID := 16#00000001; // LOG_INFO
-END_CASE;
-CmpLog.LogAdd2(
-    hLogger    := CmpLog.LogConstants.LOG_STD_LOGGER,
-    udiCmpID   := 0,
-    udiClassID := udiClassID,
-    udiErrorID := 0,
-    udiInfoID  := 0,
-    pszInfo    := sMsg
-);
-FC_LogMsg := TRUE;";
-            return (decl, impl);
-        }
-
-        public static bool EnsureCmpLogLibraryReferenced()
-        {
-            try
-            {
-                var proj = CodesysContext.PrimaryProject;
-                if (proj == null) return false;
-                var libManObj = CodesysOperations.FindObjectByName("Library Manager");
-                if (libManObj == null) return false;
-                dynamic libManExt = CodesysOperations.GetExtension<dynamic>(libManObj);
-                if (libManExt == null) return false;
-                try
-                {
-                    var existingLibs = libManExt.get_libraries(false) as System.Collections.IEnumerable;
-                    if (existingLibs != null)
-                    {
-                        foreach (var lib in existingLibs)
-                        {
-                            if (lib != null && lib.ToString().IndexOf("CmpLog", StringComparison.OrdinalIgnoreCase) >= 0)
-                            {
-                                return true;
-                            }
-                        }
-                    }
-                }
-                catch { }
-                try
-                {
-                    libManExt.add_placeholder("CmpLog", "CmpLog");
-                    return true;
-                }
-                catch
-                {
-                    try
-                    {
-                        libManExt.add_library("CmpLog");
-                        return true;
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-            return false;
-        }
-
-        public static SetupDeviceLoggerResult SetupDeviceLogger()
-        {
-            return CodesysContext.RunOnPrimaryThread(() =>
-            {
-                var proj = CodesysContext.PrimaryProject;
-                if (proj == null)
-                {
-                    return new SetupDeviceLoggerResult
-                    {
-                        success = false,
-                        message = "Cannot setup device logger when no CODESYS project is open."
-                    };
-                }
-                var res = new SetupDeviceLoggerResult();
-                // 1. Ensure CmpLog library is referenced
-                res.cmpLogReferenced = EnsureCmpLogLibraryReferenced();
-                // 2. Ensure FC_LogMsg function exists
-                var existingFc = CodesysOperations.FindObjectByName("FC_LogMsg");
-                if (existingFc == null)
-                {
-                    var (decl, impl) = GenerateLogMsgFunctionSource();
-                    CodesysOperations.WritePou("FC_LogMsg", decl, impl, "Function");
-                    res.fcCreated = true;
-                }
-                else
-                {
-                    res.fcCreated = false;
-                }
-                res.success = true;
-                res.sampleCall = "FC_LogMsg('State 20: Workpiece contacted'); // Or with concat: FC_LogMsg(CONCAT('Force=', REAL_TO_STRING(rDispForce)));";
-                res.message = "Device logger setup complete. CmpLog library and FC_LogMsg function are ready.";
-                return res;
-            });
-        }
-
-        public static PouContentResult InjectCodeLog(string pouName, string targetPattern, string logMessage, int level = 1, bool insertAfter = true)
-        {
-            if (string.IsNullOrEmpty(pouName)) throw new ArgumentException("Parameter 'pouName' is required.");
-            if (string.IsNullOrEmpty(targetPattern)) throw new ArgumentException("Parameter 'targetPattern' is required.");
-            if (string.IsNullOrEmpty(logMessage)) throw new ArgumentException("Parameter 'logMessage' is required.");
-            return CodesysContext.RunOnPrimaryThread(() =>
-            {
-                var pou = CodesysOperations.ReadPou(pouName);
-                string impl = pou.implementation ?? "";
-                int idx = impl.IndexOf(targetPattern, StringComparison.OrdinalIgnoreCase);
-                if (idx < 0)
-                {
-                    throw new InvalidOperationException($"Target pattern '{targetPattern}' not found in implementation of POU '{pouName}'.");
-                }
-                string logCall = level > 1
-                    ? $"FC_LogMsg('{logMessage}', {level});"
-                    : $"FC_LogMsg('{logMessage}');";
-                string newImpl;
-                if (insertAfter)
-                {
-                    int eol = impl.IndexOf('\n', idx);
-                    if (eol < 0) eol = impl.Length;
-                    else eol++;
-                    int lineStart = impl.LastIndexOf('\n', idx);
-                    lineStart = lineStart < 0 ? 0 : lineStart + 1;
-                    string indent = "";
-                    for (int i = lineStart; i < idx && char.IsWhiteSpace(impl[i]); i++) indent += impl[i];
-                    newImpl = impl.Substring(0, eol) + indent + logCall + "\r\n" + impl.Substring(eol);
-                }
-                else
-                {
-                    int lineStart = impl.LastIndexOf('\n', idx);
-                    lineStart = lineStart < 0 ? 0 : lineStart + 1;
-                    string indent = "";
-                    for (int i = lineStart; i < idx && char.IsWhiteSpace(impl[i]); i++) indent += impl[i];
-                    newImpl = impl.Substring(0, lineStart) + indent + logCall + "\r\n" + impl.Substring(lineStart);
-                }
-                return CodesysOperations.WritePou(pouName, pou.declaration, newImpl, "Program");
-            });
-        }
-
-        public static PlcLogsResult ReadPlcLogs(string tagFilter = null, int lastN = 32, bool clearAfterRead = false)
-        {
-            return CodesysContext.RunOnPrimaryThread(() =>
-            {
-                var proj = CodesysContext.PrimaryProject;
-                if (proj == null) return ReadPlcLogsOfflineSafe();
-                var res = new PlcLogsResult();
-                // Read logger meta properties
-                var metaVars = new List<string>
-                {
-                    "GVL_McpLogger.McpLogger.nTotalCount",
-                    "GVL_McpLogger.McpLogger.nWriteIdx",
-                    "GVL_McpLogger.McpLogger.nCycleCounter"
-                };
-                var metaRead = CodesysOnlineHelper.ReadVariables(metaVars);
-                long totalCount = 0;
-                long writeIdx = 0;
-                long cycleCounter = 0;
-                if (metaRead.values != null)
-                {
-                    if (metaRead.values.TryGetValue("GVL_McpLogger.McpLogger.nTotalCount", out string sTot))
-                        long.TryParse(CodesysOnlineHelper.NormalizeIecValue(sTot), out totalCount);
-                    if (metaRead.values.TryGetValue("GVL_McpLogger.McpLogger.nWriteIdx", out string sIdx))
-                        long.TryParse(CodesysOnlineHelper.NormalizeIecValue(sIdx), out writeIdx);
-                    if (metaRead.values.TryGetValue("GVL_McpLogger.McpLogger.nCycleCounter", out string sCyc))
-                        long.TryParse(CodesysOnlineHelper.NormalizeIecValue(sCyc), out cycleCounter);
-                }
-                res.currentPlcCycle = cycleCounter;
-                res.totalLogsWritten = totalCount;
-                if (totalCount <= 0)
-                {
-                    res.success = true;
-                    res.message = "No PLC logs have been written yet.";
-                    return res;
-                }
-
-                // Read buffered entries
-                int countToRead = (int)Math.Min(totalCount, Math.Min(64, lastN > 0 ? lastN : 32));
-                var rawEntries = new List<PlcLogEntryDto>();
-                for (int i = 0; i < countToRead; i++)
-                {
-                    var entryRead = CodesysOnlineHelper.ReadStruct($"GVL_McpLogger.McpLogger.aBuffer[{i}]");
-                    if (entryRead != null && entryRead.values != null && entryRead.values.Count > 0)
-                    {
-                        var dto = new PlcLogEntryDto();
-                        if (entryRead.values.TryGetValue("nSeq", out var vSeq)) dto.seq = Convert.ToInt64(vSeq);
-                        if (entryRead.values.TryGetValue("nCycle", out var vCyc)) dto.cycle = Convert.ToInt64(vCyc);
-                        if (entryRead.values.TryGetValue("sTag", out var vTag)) dto.tag = vTag?.ToString()?.Trim('\'');
-                        if (entryRead.values.TryGetValue("sMsg", out var vMsg)) dto.msg = vMsg?.ToString()?.Trim('\'');
-                        if (entryRead.values.TryGetValue("rVal1", out var v1)) { float.TryParse(v1?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out float f1); dto.val1 = f1; }
-                        if (entryRead.values.TryGetValue("rVal2", out var v2)) { float.TryParse(v2?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out float f2); dto.val2 = f2; }
-                        rawEntries.Add(dto);
-                    }
-                }
-                res.entries = ReconstructRingBuffer(rawEntries, totalCount, tagFilter, lastN);
-                if (clearAfterRead)
-                {
-                    try
-                    {
-                        CodesysOnlineHelper.WriteVariable("GVL_McpLogger.McpLogger.bClear", "TRUE");
-                    }
-                    catch { }
-                }
-                res.success = true;
-                res.message = $"Read {res.entries.Count} log entry(s) from PLC runtime at cycle {cycleCounter}.";
-                return res;
-            });
-        }
-
-        public static DeviceLogResult ReadDeviceLogOfflineSafe()
-        {
-            return new DeviceLogResult
-            {
-                success = false,
-                source = "offline",
-                message = "Cannot read device logs when no online session is active. You can specify 'file_path' to parse an exported log XML file."
-            };
-        }
-
-        public static DeviceLogResult ParseDeviceLogXml(string filePathOrXml, string severityFilter = null, string keyword = null, string componentFilter = null, int maxEntries = 50)
-        {
-            var res = new DeviceLogResult();
-            res.source = "file";
-            try
-            {
-                if (string.IsNullOrEmpty(filePathOrXml))
-                {
-                    res.success = false;
-                    res.message = "No XML file path or XML content provided.";
-                    return res;
-                }
-                var doc = new System.Xml.XmlDocument();
-                if (System.IO.File.Exists(filePathOrXml))
-                {
-                    doc.Load(filePathOrXml);
-                    res.source = "file: " + System.IO.Path.GetFileName(filePathOrXml);
-                }
-                else
-                {
-                    doc.LoadXml(filePathOrXml);
-                    res.source = "xml_content";
-                }
-                var entryNodes = doc.SelectNodes("//Entry");
-                if (entryNodes == null || entryNodes.Count == 0)
-                {
-                    res.success = true;
-                    res.message = "XML parsed successfully, but no <Entry> elements found.";
-                    return res;
-                }
-                var allEntries = new List<DeviceLogEntryDto>();
-                int totalInfo = 0, totalWarn = 0, totalErr = 0, totalExc = 0;
-                foreach (System.Xml.XmlNode node in entryNodes)
-                {
-                    if (node == null) continue;
-                    var dto = new DeviceLogEntryDto();
-                    dto.severity = node.Attributes?["severity"]?.Value ?? "information";
-                    dto.component = node.Attributes?["component"]?.Value ?? "";
-                    dto.user = node.Attributes?["user"]?.Value ?? "nobody";
-                    dto.infoId = node.Attributes?["infoId"]?.Value ?? "0";
-                    dto.message = node.InnerText != null ? node.InnerText.Trim() : "";
-                    string tsStr = node.Attributes?["timestamp"]?.Value;
-                    if (DateTime.TryParse(tsStr, out DateTime dt))
-                    {
-                        dto.timestamp = dt;
-                    }
-                    else
-                    {
-                        dto.timestamp = DateTime.MinValue;
-                    }
-                    string sevLower = dto.severity.ToLowerInvariant();
-                    if (sevLower.Contains("error")) totalErr++;
-                    else if (sevLower.Contains("warn")) totalWarn++;
-                    else if (sevLower.Contains("exception")) totalExc++;
-                    else totalInfo++;
-                    if (!string.IsNullOrEmpty(severityFilter) && !sevLower.Contains(severityFilter.Trim().ToLowerInvariant()))
-                        continue;
-                    if (!string.IsNullOrEmpty(componentFilter) && (dto.component == null || dto.component.IndexOf(componentFilter.Trim(), StringComparison.OrdinalIgnoreCase) < 0))
-                        continue;
-                    if (!string.IsNullOrEmpty(keyword) &&
-                        (dto.message == null || dto.message.IndexOf(keyword.Trim(), StringComparison.OrdinalIgnoreCase) < 0) &&
-                        (dto.component == null || dto.component.IndexOf(keyword.Trim(), StringComparison.OrdinalIgnoreCase) < 0))
-                        continue;
-                    allEntries.Add(dto);
-                }
-                res.totalEntries = entryNodes.Count;
-                res.infoCount = totalInfo;
-                res.warningCount = totalWarn;
-                res.errorCount = totalErr;
-                res.exceptionCount = totalExc;
-                if (maxEntries > 0 && allEntries.Count > maxEntries)
-                {
-                    res.entries = allEntries.Take(maxEntries).ToList();
-                }
-                else
-                {
-                    res.entries = allEntries;
-                }
-                res.success = true;
-                res.message = $"Successfully parsed {entryNodes.Count} total entries (matched {allEntries.Count}; returning {res.entries.Count}; Stats: {totalInfo} Info, {totalWarn} Warn, {totalErr} Error, {totalExc} Exception).";
-                return res;
-            }
-            catch (Exception ex)
-            {
-                res.success = false;
-                res.message = $"Failed to parse device log XML: {ex.Message}";
-                return res;
-            }
-        }
-
-        public static void ExportDeviceLogToXml(List<DeviceLogEntryDto> entries, string outputPath, string loggerName = "PlcLog")
-        {
-            var doc = new System.Xml.XmlDocument();
-            var dec = doc.CreateXmlDeclaration("1.0", "utf-8", null);
-            doc.AppendChild(dec);
-            var root = doc.CreateElement("LoggerEntries");
-            doc.AppendChild(root);
-            var logger = doc.CreateElement("Logger");
-            logger.SetAttribute("name", loggerName);
-            root.AppendChild(logger);
-            if (entries != null)
-            {
-                foreach (var e in entries)
-                {
-                    var entryNode = doc.CreateElement("Entry");
-                    entryNode.SetAttribute("severity", e.severity ?? "information");
-                    entryNode.SetAttribute("component", e.component ?? "");
-                    entryNode.SetAttribute("user", e.user ?? "nobody");
-                    entryNode.SetAttribute("timestamp", e.timestamp != DateTime.MinValue ? e.timestamp.ToString("yyyy/MM/dd HH:mm:ss") : DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss"));
-                    entryNode.SetAttribute("infoId", e.infoId ?? "0");
-                    entryNode.InnerText = e.message ?? "";
-                    logger.AppendChild(entryNode);
-                }
-            }
-            var dir = System.IO.Path.GetDirectoryName(outputPath);
-            if (!string.IsNullOrEmpty(dir) && !System.IO.Directory.Exists(dir))
-            {
-                System.IO.Directory.CreateDirectory(dir);
-            }
-            doc.Save(outputPath);
-        }
-
-        public static DeviceLogResult ReadDeviceLog(string filePath = null, string severityFilter = null, string keyword = null, string componentFilter = null, int maxEntries = 50, string saveToPath = null)
-        {
-            if (!string.IsNullOrEmpty(filePath))
-            {
-                var fileRes = ParseDeviceLogXml(filePath, severityFilter, keyword, componentFilter, maxEntries);
-                if (fileRes.success && !string.IsNullOrEmpty(saveToPath))
-                {
-                    try
-                    {
-                        ExportDeviceLogToXml(fileRes.entries, saveToPath);
-                        fileRes.message += $" Exported matching entries to '{saveToPath}'.";
-                    }
-                    catch (Exception ex)
-                    {
-                        fileRes.message += $" (Export failed: {ex.Message})";
-                    }
-                }
-                return fileRes;
-            }
-            return CodesysContext.RunOnPrimaryThread(() =>
-            {
-                var proj = CodesysContext.PrimaryProject;
-                if (proj == null) return ReadDeviceLogOfflineSafe();
-                var res = new DeviceLogResult();
-                res.source = "online";
-                dynamic onlineModule = CodesysContext.Online;
-                if (onlineModule == null)
-                {
-                    res.success = false;
-                    res.message = "Online engine is not available.";
-                    return res;
-                }
-                var devObj = CodesysOperations.FindObjectByName("Device");
-                if (devObj == null)
-                {
-                    res.success = false;
-                    res.message = "Device object not found in active project.";
-                    return res;
-                }
-                dynamic onlineDev = null;
-                try
-                {
-                    onlineDev = onlineModule.create_online_device(devObj);
-                }
-                catch (Exception ex)
-                {
-                    res.success = false;
-                    res.message = "Failed to create online device: " + ex.Message;
-                    return res;
-                }
-                if (onlineDev == null)
-                {
-                    res.success = false;
-                    res.message = "create_online_device returned null.";
-                    return res;
-                }
-                try
-                {
-                    bool isConnected = false;
-                    try { isConnected = (bool)onlineDev.get_connected(); } catch { }
-                    if (!isConnected)
-                    {
-                        try { onlineDev.connect(); } catch { }
-                    }
-                }
-                catch { }
-                dynamic loggerService = null;
-                try
-                {
-                    var m = onlineDev.GetType().GetMethod("CreateLoggerServiceHandler");
-                    if (m != null)
-                    {
-                        loggerService = m.Invoke(onlineDev, null);
-                    }
-                    else
-                    {
-                        foreach (var iface in onlineDev.GetType().GetInterfaces())
-                        {
-                            if (iface.Name.Contains("IOnlineDevice3"))
-                            {
-                                var m3 = iface.GetMethod("CreateLoggerServiceHandler");
-                                if (m3 != null)
-                                {
-                                    loggerService = m3.Invoke(onlineDev, null);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    res.success = false;
-                    res.message = "Failed to create logger service handler: " + ex.Message;
-                    return res;
-                }
-                if (loggerService == null)
-                {
-                    res.success = false;
-                    res.message = "Logger service handler is not supported on this device.";
-                    return res;
-                }
-                try
-                {
-                    var arNames = loggerService.BeginGetLoggerNames(null, null);
-                    string[] names = loggerService.EndGetLoggerNames(arNames);
-                    string targetName = (names != null && names.Length > 0) ? names[0] : "PlcLog";
-                    var arEntries = loggerService.BeginGetLoggerEntries(null, null, (uint)0, DateTime.MinValue, targetName);
-                    dynamic entries = loggerService.EndGetLoggerEntries(arEntries);
-                    if (entries != null)
-                    {
-                        var dtoList = new List<DeviceLogEntryDto>();
-                        int totalInfo = 0, totalWarn = 0, totalErr = 0, totalExc = 0;
-                        int totalRaw = 0;
-                        foreach (var entry in entries)
-                        {
-                            if (entry == null) continue;
-                            totalRaw++;
-                            var dto = new DeviceLogEntryDto();
-                            try { dto.timestamp = (DateTime)entry.TimeStamp; } catch { dto.timestamp = DateTime.Now; }
-                            try { dto.message = entry.Info?.ToString() ?? ""; } catch { dto.message = ""; }
-                            try { dto.component = entry.CmpID.ToString(); } catch { }
-                            try
-                            {
-                                var sev = entry.GetSeverity();
-                                dto.severity = sev != null ? sev.ToString() : "Info";
-                            }
-                            catch { dto.severity = "Info"; }
-                            string sevLower = dto.severity.ToLowerInvariant();
-                            if (sevLower.Contains("error")) totalErr++;
-                            else if (sevLower.Contains("warn")) totalWarn++;
-                            else if (sevLower.Contains("exception")) totalExc++;
-                            else totalInfo++;
-                            if (!string.IsNullOrEmpty(severityFilter) && !sevLower.Contains(severityFilter.Trim().ToLowerInvariant()))
-                                continue;
-                            if (!string.IsNullOrEmpty(componentFilter) && (dto.component == null || dto.component.IndexOf(componentFilter.Trim(), StringComparison.OrdinalIgnoreCase) < 0))
-                                continue;
-                            if (!string.IsNullOrEmpty(keyword) && (dto.message == null || dto.message.IndexOf(keyword.Trim(), StringComparison.OrdinalIgnoreCase) < 0))
-                                continue;
-                            dtoList.Add(dto);
-                        }
-                        res.totalEntries = totalRaw;
-                        res.infoCount = totalInfo;
-                        res.warningCount = totalWarn;
-                        res.errorCount = totalErr;
-                        res.exceptionCount = totalExc;
-                        if (maxEntries > 0 && dtoList.Count > maxEntries)
-                        {
-                            dtoList = dtoList.Skip(dtoList.Count - maxEntries).ToList();
-                        }
-                        res.entries = dtoList;
-                        res.success = true;
-                        res.message = $"Successfully read {totalRaw} device log entries (returning {dtoList.Count}; Stats: {totalInfo} Info, {totalWarn} Warn, {totalErr} Error, {totalExc} Exception).";
-                        if (!string.IsNullOrEmpty(saveToPath))
-                        {
-                            try
-                            {
-                                ExportDeviceLogToXml(dtoList, saveToPath, targetName);
-                                res.message += $" Exported entries to '{saveToPath}'.";
-                            }
-                            catch (Exception ex)
-                            {
-                                res.message += $" (Export failed: {ex.Message})";
-                            }
-                        }
-                        return res;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    res.success = false;
-                    res.message = "Error fetching logger entries: " + ex.Message;
-                    return res;
-                }
-                res.success = true;
-                res.message = "No device log entries recorded.";
-                return res;
-            });
         }
     }
 }

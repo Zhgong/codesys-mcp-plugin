@@ -36,8 +36,23 @@ namespace CodesysMcp
         public string version { get; set; }
     }
 
+    public class IdeScreenshotResult
+    {
+        public bool success { get; set; }
+        public string filePath { get; set; }
+        public int width { get; set; }
+        public int height { get; set; }
+        public long fileSizeBytes { get; set; }
+        public string windowTitle { get; set; }
+        public string captureMethod { get; set; }
+        public string message { get; set; }
+    }
+
     public static class CodesysIdeUiHelper
     {
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
+        private const uint PW_RENDERFULLCONTENT = 0x00000002;
         private static readonly object _syncLock = new object();
         private static ToolStripStatusLabel _statusBadge = null;
         private static StatusStrip _hostStatusStrip = null;
@@ -855,6 +870,121 @@ namespace CodesysMcp
                 form.Activate();
             }
             catch { }
+        }
+
+        /// <summary>
+        /// Renders only the given WinForms Form to PNG using PrintWindow (with DrawToBitmap fallback),
+        /// never capturing external screen regions or non-CODESYS windows.
+        /// </summary>
+        public static IdeScreenshotResult CaptureFormToPng(Form targetForm, string outputPath = null, int maxWidth = 0)
+        {
+            if (targetForm == null || targetForm.IsDisposed || !targetForm.IsHandleCreated)
+            {
+                return new IdeScreenshotResult
+                {
+                    success = false,
+                    message = "No active CODESYS IDE window found (headless mode)."
+                };
+            }
+
+            string title = targetForm.Text ?? string.Empty;
+            if (targetForm.WindowState == FormWindowState.Minimized || targetForm.Width <= 0 || targetForm.Height <= 0)
+            {
+                return new IdeScreenshotResult
+                {
+                    success = false,
+                    windowTitle = title,
+                    message = "CODESYS IDE window is minimized; restore it before capturing screenshot."
+                };
+            }
+
+            try { targetForm.Refresh(); } catch { }
+            try { Application.DoEvents(); } catch { }
+
+            string outPath = !string.IsNullOrWhiteSpace(outputPath)
+                ? outputPath.Trim()
+                : Path.Combine(Path.GetTempPath(), $"codesys_ide_{DateTime.Now:yyyyMMdd_HHmmss}.png");
+
+            string dir = Path.GetDirectoryName(outPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            string methodUsed;
+            int finalWidth;
+            int finalHeight;
+
+            using (var rawBmp = new Bitmap(targetForm.Width, targetForm.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+            {
+                bool captured = false;
+                methodUsed = "PrintWindow_FullContent";
+                using (var gfx = Graphics.FromImage(rawBmp))
+                {
+                    IntPtr hdc = gfx.GetHdc();
+                    try
+                    {
+                        captured = PrintWindow(targetForm.Handle, hdc, PW_RENDERFULLCONTENT);
+                        if (!captured)
+                        {
+                            methodUsed = "PrintWindow";
+                            captured = PrintWindow(targetForm.Handle, hdc, 0);
+                        }
+                    }
+                    finally
+                    {
+                        gfx.ReleaseHdc(hdc);
+                    }
+                }
+
+                if (!captured)
+                {
+                    methodUsed = "DrawToBitmap";
+                    targetForm.DrawToBitmap(rawBmp, new Rectangle(0, 0, targetForm.Width, targetForm.Height));
+                }
+
+                if (maxWidth > 0 && rawBmp.Width > maxWidth)
+                {
+                    int targetH = Math.Max(1, (int)Math.Round(rawBmp.Height * ((double)maxWidth / rawBmp.Width)));
+                    using (var scaled = new Bitmap(maxWidth, targetH, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+                    {
+                        using (var sg = Graphics.FromImage(scaled))
+                        {
+                            sg.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                            sg.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                            sg.DrawImage(rawBmp, 0, 0, maxWidth, targetH);
+                        }
+                        scaled.Save(outPath, System.Drawing.Imaging.ImageFormat.Png);
+                        finalWidth = scaled.Width;
+                        finalHeight = scaled.Height;
+                    }
+                }
+                else
+                {
+                    rawBmp.Save(outPath, System.Drawing.Imaging.ImageFormat.Png);
+                    finalWidth = rawBmp.Width;
+                    finalHeight = rawBmp.Height;
+                }
+            }
+
+            long sizeBytes = new FileInfo(outPath).Length;
+            return new IdeScreenshotResult
+            {
+                success = true,
+                filePath = outPath,
+                width = finalWidth,
+                height = finalHeight,
+                fileSizeBytes = sizeBytes,
+                windowTitle = title,
+                captureMethod = methodUsed,
+                message = $"Captured CODESYS IDE window '{title}' ({finalWidth}x{finalHeight}, {sizeBytes} bytes) via {methodUsed}."
+            };
+        }
+
+        public static IdeScreenshotResult CaptureIdeScreenshot(string outputPath = null, int maxWidth = 0)
+        {
+            return CodesysContext.RunOnPrimaryThread(() =>
+                CaptureFormToPng(FindMainCodesysForm() as Form, outputPath, maxWidth));
         }
     }
 }

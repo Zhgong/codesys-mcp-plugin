@@ -475,6 +475,7 @@ namespace CodesysMcp
 
                 WritePou(name, snap.OriginalDeclaration, snap.OriginalImplementation, snap.PouType);
                 _snapshots.Remove(name);
+                CodesysOnlineHelper.ClearDutMembersCache();
                 CodesysContext.LogToIde($"Rollback: Reverted POU '{name}' to baseline snapshot");
                 return new RollbackResult
                 {

@@ -111,7 +111,7 @@ Write-Host "`n[Step 3/5] Extracting release notes from CHANGELOG.md..." -Foregro
 $changelogFile = Join-Path $Root "CHANGELOG.md"
 $notesContent = ""
 if (Test-Path $changelogFile) {
-    $changelog = Get-Content $changelogFile -Raw
+    $changelog = Get-Content $changelogFile -Raw -Encoding UTF8
     $pattern = '(?s)## \[' + [regex]::Escape($version) + '\][^\r\n]*\r?\n(.*?)(?=\r?\n## \[|\Z)'
     if ($changelog -match $pattern) {
         $notesContent = $matches[1].Trim()

@@ -463,7 +463,7 @@ namespace CodesysMcp
                 new
                 {
                     name = "get_trace_info",
-                    description = "Get information and variable list from a CODESYS Trace object.",
+                    description = "Get variable list, trigger settings, and recording configuration from a CODESYS Trace object.",
                     inputSchema = new
                     {
                         type = "object",
@@ -549,18 +549,60 @@ namespace CodesysMcp
                 },
                 new
                 {
-                    name = "analyze_trace",
-                    description = "Analyze exported CODESYS Trace file (.trace XML or .csv) offline to extract channel statistics, signal transitions, and condition matches without touching PLC runtime.",
+                    name = "capture_ide_screenshot",
+                    description = "Capture a PNG screenshot of the running CODESYS IDE main window itself (via Win32 PrintWindow on the UI thread, never capturing external desktop windows) for Before/After visual verification.",
                     inputSchema = new
                     {
                         type = "object",
                         properties = new
                         {
-                            file_path = new { type = "string", description = "Path to exported .trace (XML) or .csv file on disk" },
-                            filter_condition = new { type = "string", description = "Optional condition expression to search in trace (e.g. 'rDispForce >= 5000' or 'bHmiStop == 1')" },
-                            deadband = new { type = "number", description = "Deadband threshold for continuous analog value change detection (defaults to 0.01)" }
+                            output_path = new { type = "string", description = "Optional destination .png file path (defaults to %TEMP%\\codesys_ide_YYYYMMDD_HHmmss.png)" },
+                            max_width = new { type = "integer", description = "Optional maximum output width in pixels for proportional downscaling (0 keeps native resolution)" }
+                        }
+                    }
+                },
+                new
+                {
+                    name = "control_trace",
+                    description = "Control and configure a CODESYS Trace object: query state ('status'), update trigger/recording configuration ('configure'), download config to PLC ('download', optionally updating trigger settings first), start recording ('start'), stop recording ('stop'), or re-arm trigger ('reset_trigger').",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            trace_name = new { type = "string", description = "Trace object name in the project (defaults to 'Trace')" },
+                            action = new { type = "string", description = "Trace action: 'status', 'configure', 'download', 'start', 'stop', or 'reset_trigger'" },
+                            trigger_enabled = new { type = "boolean", description = "Optional: enable or disable hardware/runtime trigger (auto-enabled when trigger_variable is set unless explicitly false)" },
+                            trigger_variable = new { type = "string", description = "Optional: IEC variable expression for trigger (e.g. 'MOTION_PRG.bDispDone' or 'MOTION_PRG.rDispForce'); pass empty string to clear" },
+                            trigger_edge = new { type = "string", description = "Optional: trigger edge ('positive', 'negative', 'both', or 'undefined')" },
+                            trigger_level = new { type = "string", description = "Optional: trigger threshold/level (e.g. '4500' for analog variables; omit for boolean edge triggers)" },
+                            post_trigger_samples = new { type = "integer", description = "Optional: number of samples to record after the trigger fires before stopping (e.g. 50)" },
+                            record_condition = new { type = "string", description = "Optional: IEC boolean recording condition expression (e.g. 'MOTION_PRG.bDispBusy'); pass empty string to clear" },
+                            every_n_cycles = new { type = "integer", description = "Optional: record one sample every N task cycles (must be >= 1)" },
+                            task_name = new { type = "string", description = "Optional: IEC task name to bind Trace sampling to (e.g. 'Task')" },
+                            auto_start = new { type = "boolean", description = "Optional: enable or disable automatic Trace restart" }
                         },
-                        required = new[] { "file_path" }
+                        required = new[] { "action" }
+                    }
+                },
+                new
+                {
+                    name = "analyze_trace",
+                    description = "Analyze exported CODESYS Trace file (.trace XML or .csv) or export an active project Trace to extract channel statistics, signal transitions, condition matches, and optional downsampled JSON waveform series.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            file_path = new { type = "string", description = "Path to exported .trace (XML) or .csv file on disk (optional if trace_name is provided for live export)" },
+                            trace_name = new { type = "string", description = "Optional CODESYS Trace object name (e.g. 'Trace') to export from the open editor when file_path is omitted or not yet on disk" },
+                            filter_condition = new { type = "string", description = "Optional condition expression to search in trace (e.g. 'rDispForce >= 5000' or 'bHmiStop == 1')" },
+                            deadband = new { type = "number", description = "Deadband threshold for continuous analog value change detection (defaults to 0.01)" },
+                            include_series = new { type = "boolean", description = "When true, includes JSON timestamps and per-channel waveform value arrays in the response (default: false)" },
+                            start_ms = new { type = "number", description = "Optional inclusive window start timestamp in milliseconds" },
+                            end_ms = new { type = "number", description = "Optional inclusive window end timestamp in milliseconds" },
+                            max_points = new { type = "integer", description = "Optional maximum number of waveform points to return when include_series is true (0 returns all points; >0 applies peak-preserving downsampling)" }
+                        }
                     }
                 },
                 new

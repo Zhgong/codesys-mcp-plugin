@@ -30,7 +30,7 @@ namespace CodesysMcpTests
 
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools, "tools array should not be null");
-            Assert.AreEqual(43, tools.Count, "Expected exactly 43 registered tools");
+            Assert.AreEqual(45, tools.Count, "Expected exactly 45 registered tools");
 
             var expectedTools = new HashSet<string>
             {
@@ -66,11 +66,13 @@ namespace CodesysMcpTests
                 "unforce_variables",
                 "add_trace_variable",
                 "get_trace_info",
+                "control_trace",
                 "batch_write_variables",
                 "write_struct",
                 "read_struct",
                 "read_array",
                 "get_ui_indicator_status",
+                "capture_ide_screenshot",
                 "analyze_trace",
                 "setup_plc_logger",
                 "read_plc_logs",
@@ -312,6 +314,47 @@ namespace CodesysMcpTests
             var content = result["content"] as ArrayList;
             var firstItem = content[0] as Dictionary<string, object>;
             Assert.Contains("variable_name", firstItem["text"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestControlTraceSchemaIncludesTriggerConfigurationParameters()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 18, \"method\": \"tools/list\"}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            var tools = result["tools"] as ArrayList;
+            Dictionary<string, object> controlTraceTool = null;
+            foreach (Dictionary<string, object> tool in tools)
+            {
+                if (string.Equals(tool["name"]?.ToString(), "control_trace", StringComparison.Ordinal))
+                {
+                    controlTraceTool = tool;
+                    break;
+                }
+            }
+
+            Assert.IsNotNull(controlTraceTool, "control_trace tool must exist in tools/list");
+            var schema = controlTraceTool["inputSchema"] as Dictionary<string, object>;
+            var props = schema["properties"] as Dictionary<string, object>;
+            string[] expectedParams = new[]
+            {
+                "trace_name",
+                "action",
+                "trigger_enabled",
+                "trigger_variable",
+                "trigger_edge",
+                "trigger_level",
+                "post_trigger_samples",
+                "record_condition",
+                "every_n_cycles",
+                "task_name",
+                "auto_start"
+            };
+            foreach (string paramName in expectedParams)
+            {
+                Assert.IsTrue(props.ContainsKey(paramName), $"control_trace schema must expose '{paramName}'");
+            }
         }
     }
 }

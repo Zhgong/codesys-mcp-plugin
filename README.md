@@ -68,17 +68,20 @@ codesys-mcp-plugin/
 │   ├── CodesysOperations.SearchAndDiff.cs # Live-buffer search, diff generation, preview & rollback
 │   ├── CodesysOperations.Mirror.cs      # Adaptive IDE-to-.st mirror polling & Git commit hooks
 │   ├── McpServer.cs                     # Full-duplex Named Pipe JSON-RPC 2.0 protocol engine
-│   ├── McpServer.Schemas.cs             # Registered MCP tool definitions (43 tools) & dispatch schemas
+│   ├── McpServer.Schemas.cs             # Registered MCP tool definitions (45 tools) & dispatch schemas
 │   ├── CodesysEditorBufferHelper.cs     # Reflection reader for live unsaved ST/declaration editor buffers
 │   ├── SourceMirrorHelper.cs            # One-way .st serializer, SHA-256 diff guard & Git integration
-│   ├── CodesysOnlineHelper.cs           # Online PLC control, variables, structs, arrays & trace helpers
-│   ├── PlcTraceAndLoggerHelper.cs       # Ring-buffer PLC logger, device logs & trace CSV/XML analyzer
-│   ├── CodesysIdeUiHelper.cs            # IDE status strip badge, diagnostics card & mirror controls
-│   ├── DeviceLogonWatchdog.cs           # Native Win32 modal logon watchdog
-│   └── ServerBootstrap.cs               # Entry point called by IronPython bootstrap
+│   ├── CodesysOnlineHelper.cs           # Online PLC login, control & topology inspection
+│   ├── CodesysOnlineHelper.Variables.cs # Variable read/write, stale handle eviction & forcing
+│   ├── CodesysOnlineHelper.Batch.cs     # Batch atomic writes, DUT struct & array helpers
+│   ├── PlcTraceAndLoggerHelper.cs       # Trace control, hardware triggers & CSV/XML waveform analyzer
+│   ├── PlcTraceAndLoggerHelper.Logger.cs# Ring-buffer PLC logger & online CmpLog device log reader
+│   ├── CodesysIdeUiHelper.cs            # IDE status strip badge, diagnostics card & window screenshot
+│   ├── DeviceLogonWatchdog.cs           # Native Win32 modal logon & prompt auto-confirm watchdog
+│   └── ServerBootstrap.cs               # Entry point & cross-assembly hot-reload handoff
 ├── CodesysMcpCli/
 │   └── Program.cs                       # Full-duplex stdin/stdout pipe forwarder & EOF drain engine
-├── CodesysMcpTests/                     # C# unit & real-DLL contract test suite (137 tests)
+├── CodesysMcpTests/                     # C# unit & real-DLL contract test suite (149 tests)
 ├── tests/
 │   ├── test_cli_protocol.py             # Mock Named Pipe CLI protocol, heartbeat & reconnect tests
 │   ├── test_codesys_e2e.py              # Live CODESYS MCP E2E integration suite
@@ -193,7 +196,7 @@ This plugin incorporates a **three-tier safety architecture** providing silent, 
 
 ---
 
-## 🛠️ Supported MCP Tools (43 Tools)
+## 🛠️ Supported MCP Tools (45 Tools)
 
 ### 1. Project Management & Navigation
 | Tool Name | Arguments | Description |
@@ -252,9 +255,10 @@ This plugin incorporates a **three-tier safety architecture** providing silent, 
 ### 6. Real-time Trace Engine
 | Tool Name | Arguments | Description |
 | :--- | :--- | :--- |
-| `add_trace_variable` | `variable: string`, `task?: string` | Adds a variable to the active trace configuration. |
-| `get_trace_info` | `trace_name?: string` | Retrieves trace buffer status, sample count, and timestamps. |
-| `analyze_trace` | `trace_name?: string`, `metrics?: string[]` | Analyzes trace data (min/max, settling time, rate of change). |
+| `add_trace_variable` | `variable_name: string`, `trace_name?: string` | Adds a variable to the active trace configuration and diagram. |
+| `get_trace_info` | `trace_name?: string` | Retrieves trace variable list, trigger settings, and recording configuration. |
+| `control_trace` | `action: string`, `trace_name?: string`, `trigger_enabled?`, `trigger_variable?`, `trigger_edge?`, `trigger_level?`, `post_trigger_samples?`, `record_condition?`, `every_n_cycles?`, `task_name?`, `auto_start?` | Controls Trace execution (`status`, `configure`, `download` with force-overwrite, `start`, `stop`, `reset_trigger`) and configures hardware/runtime triggers. |
+| `analyze_trace` | `file_path?: string`, `trace_name?: string`, `filter_condition?: string`, `deadband?: number`, `include_series?: bool`, `start_ms?: number`, `end_ms?: number`, `max_points?: int` | Exports and analyzes `.trace` XML or `.csv` data (channel stats, transitions, condition matches, and peak-preserving downsampled series). |
 
 ### 7. Logging & Diagnostics
 | Tool Name | Arguments | Description |
@@ -265,10 +269,11 @@ This plugin incorporates a **three-tier safety architecture** providing silent, 
 | `read_device_log` | `device?: string`, `max_entries?: int` | Retrieves hardware and firmware diagnostic logs. |
 | `inject_code_log` | `pou: string`, `line: int`, `message: string` | Injects non-intrusive trace logs into source code. |
 
-### 8. IDE UI Indicator & Diagnostics Card
+### 8. IDE UI Indicator, Diagnostics & Visual Verification
 | Tool Name | Arguments | Description |
 | :--- | :--- | :--- |
 | `get_ui_indicator_status` | None | Returns CODESYS status strip indicator status, heartbeat, total requests, and diagnostics card state. |
+| `capture_ide_screenshot` | `output_path?: string`, `max_width?: int` | Captures a PNG screenshot of the CODESYS IDE main window via Win32 `PrintWindow` for visual verification. |
 
 ---
 

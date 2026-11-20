@@ -29,11 +29,57 @@ def is_codesys_pipe_active():
         return False
 
 class TestCodesysLiveE2E(unittest.TestCase):
+    _was_logged_in = False
 
     @classmethod
     def setUpClass(cls):
         if not is_codesys_pipe_active():
             raise unittest.SkipTest("CODESYS IDE / MCP pipe is not currently running. Skipping live E2E tests.")
+        proc = subprocess.Popen(
+            [CLI_EXE],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+        try:
+            proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_online_status", "arguments": {}}}) + "\n")
+            proc.stdin.flush()
+            status = json.loads(json.loads(proc.stdout.readline())["result"]["content"][0]["text"])
+            if status.get("isLoggedIn", False):
+                cls._was_logged_in = True
+                proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "plc_logout", "arguments": {}}}) + "\n")
+                proc.stdin.flush()
+                proc.stdout.readline()
+        finally:
+            proc.stdin.close()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._was_logged_in and is_codesys_pipe_active():
+            proc = subprocess.Popen(
+                [CLI_EXE],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1
+            )
+            try:
+                proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "plc_login", "arguments": {"mode": "try_online_change", "delete_foreign_apps": True}}}) + "\n")
+                proc.stdin.flush()
+                proc.stdout.readline()
+            finally:
+                proc.stdin.close()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
 
     def setUp(self):
         self.proc = subprocess.Popen(
@@ -83,6 +129,8 @@ class TestCodesysLiveE2E(unittest.TestCase):
         self.assertIn("search_code", tool_names)
         self.assertIn("get_diff", tool_names)
         self.assertIn("rollback_pou", tool_names)
+        self.assertIn("control_trace", tool_names)
+        self.assertIn("capture_ide_screenshot", tool_names)
 
     def test_01b_notifications_and_ping_without_deadlock(self):
         init_resp = self.rpc("initialize", req_id=12)
@@ -323,6 +371,225 @@ class TestCodesysLiveE2E(unittest.TestCase):
                     pass
                 try:
                     self.tool("delete_pou", {"name": test_pou}, req_id=76)
+                except Exception:
+                    pass
+
+    def test_08_setup_plc_logger_auto_inject_and_compile(self):
+        info = self.tool("get_project_info", req_id=80)
+        if not info.get("isOpen", False):
+            self.skipTest("No project is currently open in CODESYS.")
+
+        test_pou = "LoggerE2ETestPRG"
+        decl = (
+            "PROGRAM LoggerE2ETestPRG\n"
+            "VAR\n"
+            "    rDispPos : REAL := 12.5;\n"
+            "    rForce   : REAL := 5120.0;\n"
+            "END_VAR"
+        )
+        setup_res = {}
+        try:
+            self.tool("write_pou", {
+                "name": test_pou,
+                "declaration": decl,
+                "implementation": "// logger e2e baseline",
+                "type": "Program"
+            }, req_id=81)
+
+            setup_res = self.tool("setup_plc_logger", {
+                "buffer_size": 16,
+                "auto_inject_pou": test_pou
+            }, req_id=82)
+            self.assertTrue(setup_res.get("success", False), f"setup_plc_logger failed: {setup_res}")
+
+            pou_after = self.tool("read_pou", {"name": test_pou}, req_id=83)
+            impl_after = pou_after.get("implementation", "")
+            self.assertIn("GVL_McpLogger.McpLogger.TickCycle();", impl_after)
+
+            sample_code = setup_res.get("sampleCode", "")
+            self.assertIn("GVL_McpLogger.McpLogger.WriteLog(", sample_code)
+
+            self.tool("write_pou", {
+                "name": test_pou,
+                "declaration": decl,
+                "implementation": impl_after.rstrip() + "\n" + sample_code,
+                "type": "Program"
+            }, req_id=84)
+
+            compile_res = self.tool("compile_project", {"clean": False, "rebuild": False}, req_id=85)
+            self.assertTrue(compile_res.get("success", False), f"compile_project failed: {compile_res}")
+            self.assertEqual(compile_res.get("errorCount", -1), 0, f"Compiler errors: {compile_res}")
+        finally:
+            try:
+                self.tool("delete_pou", {"name": test_pou}, req_id=86)
+            except Exception:
+                pass
+            if not setup_res or setup_res.get("gvlCreated"):
+                try:
+                    self.tool("delete_pou", {"name": "GVL_McpLogger"}, req_id=87)
+                except Exception:
+                    pass
+            if not setup_res or setup_res.get("fbCreated"):
+                try:
+                    self.tool("delete_pou", {"name": "FB_McpLogger"}, req_id=88)
+                except Exception:
+                    pass
+            if not setup_res or setup_res.get("dutCreated"):
+                try:
+                    self.tool("delete_pou", {"name": "ST_McpLogEntry"}, req_id=89)
+                except Exception:
+                    pass
+
+    def test_09_analyze_trace_series_window_and_downsampling(self):
+        with tempfile.TemporaryDirectory(prefix="codesys_trace_e2e_") as tmp_dir:
+            csv_path = os.path.join(tmp_dir, "waveform_2000.csv")
+            lines = ["Time (ms);Application.MOTION_PRG.rPos;Application.MOTION_PRG.rForce"]
+            for i in range(2000):
+                t = float(i)
+                pos = round(i * 0.1, 3)
+                force = 9999.5 if i == 250 else (-123.5 if i == 375 else round(100.0 + (i % 25), 3))
+                lines.append(f"{t:.1f};{pos};{force}")
+            with open(csv_path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write("\n".join(lines))
+
+            res = self.tool("analyze_trace", {
+                "file_path": csv_path,
+                "include_series": True,
+                "start_ms": 100.0,
+                "end_ms": 500.0,
+                "max_points": 50,
+                "filter_condition": "rForce >= 9000"
+            }, req_id=90)
+
+            self.assertTrue(res.get("success", False), f"analyze_trace failed: {res}")
+            self.assertEqual(res.get("totalCyclesRecorded"), 2000)
+            self.assertEqual(res.get("returnedPointsCount"), 50)
+            ts = res.get("timestamps", [])
+            self.assertEqual(len(ts), 50)
+            self.assertEqual(ts[0], 100.0)
+            self.assertEqual(ts[-1], 500.0)
+            force_series = res.get("series", {}).get("Application.MOTION_PRG.rForce", [])
+            self.assertEqual(len(force_series), 50)
+            self.assertIn(9999.5, force_series)
+            self.assertIn(-123.5, force_series)
+
+    def test_10_softplc_online_vars_struct_and_plc_logger_e2e(self):
+        info = self.tool("get_project_info", req_id=100)
+        if not info.get("isOpen", False):
+            self.skipTest("No project is currently open in CODESYS.")
+
+        # Probe whether SoftPLC runtime is reachable; skip cleanly when offline (e.g. headless CI without SoftPLC)
+        login_resp = self.rpc("tools/call", {
+            "name": "plc_login",
+            "arguments": {"mode": "try_online_change", "delete_foreign_apps": True}
+        }, req_id=101)
+        login_result = login_resp.get("result", {})
+        if login_result.get("isError", False):
+            self.skipTest(f"SoftPLC runtime not reachable for online E2E: {login_result.get('content', [{}])[0].get('text', '')[:120]}")
+
+        orig_pou = None
+        orig_recipe = None
+        setup_res = {}
+        try:
+            status_res = self.tool("get_online_status", {}, req_id=102)
+            if str(status_res.get("applicationState", "")).lower() != "run":
+                self.tool("plc_control", {"action": "start"}, req_id=103)
+
+            orig_recipe = self.tool("read_struct", {"struct_name": "MOTION_PRG.PressRecipe"}, req_id=105).get("values")
+
+            # Must log out before modifying/adding POUs in CODESYS Project tree
+            self.tool("plc_logout", {}, req_id=104)
+            orig_pou = self.tool("read_pou", {"name": "MOTION_PRG"}, req_id=106)
+
+            setup_res = self.tool("setup_plc_logger", {
+                "buffer_size": 32,
+                "auto_inject_pou": "MOTION_PRG"
+            }, req_id=107)
+            self.assertTrue(setup_res.get("success", False))
+
+            pou_with_tick = self.tool("read_pou", {"name": "MOTION_PRG"}, req_id=108)
+            impl = pou_with_tick.get("implementation", "")
+            e2e_log_call = "GVL_McpLogger.McpLogger.WriteLog(sTag := 'E2E_ONLINE', sMsg := 'SoftPLC E2E log verified', rVal1 := rDispPos, rVal2 := rDispForce);"
+            if e2e_log_call not in impl:
+                if "GVL_McpLogger.McpLogger.TickCycle();" in impl:
+                    new_impl = impl.replace("GVL_McpLogger.McpLogger.TickCycle();", "GVL_McpLogger.McpLogger.TickCycle();\r\n" + e2e_log_call, 1)
+                else:
+                    new_impl = e2e_log_call + "\r\n" + impl
+                self.tool("write_pou", {
+                    "name": "MOTION_PRG",
+                    "declaration": pou_with_tick.get("declaration", ""),
+                    "implementation": new_impl,
+                    "type": pou_with_tick.get("type", "Program")
+                }, req_id=109)
+
+            comp_res = self.tool("compile_project", {"clean": False, "rebuild": False}, req_id=110)
+            self.assertTrue(comp_res.get("success", False), f"compile_project failed: {comp_res}")
+
+            login2 = self.tool("plc_login", {"mode": "try_online_change", "delete_foreign_apps": True}, req_id=111)
+            self.assertTrue(login2.get("isLoggedIn", False))
+            if str(login2.get("applicationState", "")).lower() != "run":
+                self.tool("plc_control", {"action": "start"}, req_id=112)
+
+            time.sleep(0.5)
+            logs_res = self.tool("read_plc_logs", {"last_n": 10}, req_id=113)
+            self.assertTrue(logs_res.get("success", False))
+            self.assertGreaterEqual(logs_res.get("totalLogsWritten", 0), 1, f"Expected logs in SoftPLC, got: {logs_res}")
+            entries = logs_res.get("entries", [])
+            self.assertTrue(any(e.get("tag") == "E2E_ONLINE" for e in entries), f"Expected 'E2E_ONLINE' entry in PLC ring buffer, got: {entries}")
+
+            t0 = time.perf_counter()
+            struct_res = self.tool("read_struct", {"struct_name": "MOTION_PRG.PressRecipe"}, req_id=114)
+            struct_ms = (time.perf_counter() - t0) * 1000.0
+            self.assertTrue(struct_res.get("success", False))
+            self.assertGreaterEqual(len(struct_res.get("values", {})), 8)
+            self.assertLess(struct_ms, 800.0, f"Batch read_struct should finish in < 800ms, took {struct_ms:.1f}ms")
+
+            write_res = self.tool("write_struct", {
+                "struct_name": "MOTION_PRG.PressRecipe",
+                "values": {"rTargetForce": 5550.0, "rFastSpeed": 47.0},
+                "verify": True
+            }, req_id=115)
+            self.assertTrue(write_res.get("allVerified", False))
+        finally:
+            if orig_recipe and "rTargetForce" in orig_recipe and "rFastSpeed" in orig_recipe:
+                try:
+                    self.tool("write_struct", {
+                        "struct_name": "MOTION_PRG.PressRecipe",
+                        "values": {
+                            "rTargetForce": orig_recipe["rTargetForce"],
+                            "rFastSpeed": orig_recipe["rFastSpeed"]
+                        },
+                        "verify": False
+                    }, req_id=116)
+                except Exception:
+                    pass
+            try:
+                self.tool("plc_logout", {}, req_id=117)
+            except Exception:
+                pass
+            if orig_pou is not None:
+                try:
+                    self.tool("write_pou", {
+                        "name": "MOTION_PRG",
+                        "declaration": orig_pou.get("declaration", ""),
+                        "implementation": orig_pou.get("implementation", ""),
+                        "type": orig_pou.get("type", "Program")
+                    }, req_id=118)
+                except Exception:
+                    pass
+            if setup_res.get("gvlCreated"):
+                try:
+                    self.tool("delete_pou", {"name": "GVL_McpLogger"}, req_id=119)
+                except Exception:
+                    pass
+            if setup_res.get("fbCreated"):
+                try:
+                    self.tool("delete_pou", {"name": "FB_McpLogger"}, req_id=120)
+                except Exception:
+                    pass
+            if setup_res.get("dutCreated"):
+                try:
+                    self.tool("delete_pou", {"name": "ST_McpLogEntry"}, req_id=121)
                 except Exception:
                     pass
 

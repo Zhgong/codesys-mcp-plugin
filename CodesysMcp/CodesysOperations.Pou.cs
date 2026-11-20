@@ -218,6 +218,7 @@ namespace CodesysMcp
                     implExt?.textual_implementation?.replace(implementation);
                 }
 
+                CodesysOnlineHelper.ClearDutMembersCache();
                 var written = ReadPou(name, includeLiveEditorOverlay: false);
                 TryMirrorWrittenObject(extObj, written);
                 return written;
@@ -372,6 +373,7 @@ namespace CodesysMcp
                 string relPath = SourceMirrorHelper.HasActiveMirror ? GetObjectRelativePath(extObj) : null;
                 var obj = GetExtension<IScriptObject>(extObj) ?? extObj as IScriptObject;
                 obj?.remove();
+                CodesysOnlineHelper.ClearDutMembersCache();
                 if (!string.IsNullOrWhiteSpace(relPath) && SourceMirrorHelper.HasActiveMirror)
                 {
                     try

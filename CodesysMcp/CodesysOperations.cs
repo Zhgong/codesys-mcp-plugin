@@ -212,6 +212,7 @@ namespace CodesysMcp
         {
             _snapshots.Clear();
             _projectBaselines.Clear();
+            CodesysOnlineHelper.ClearDutMembersCache();
         }
 
         public static ProjectInfoResult GetProjectInfo()
@@ -268,6 +269,7 @@ namespace CodesysMcp
                 CodesysContext.Projects.open(projectPath);
                 _snapshots.Clear();
                 _projectBaselines.Clear();
+                CodesysOnlineHelper.ClearDutMembersCache();
                 _autoBoundProjectPath = null;
                 var info = GetProjectInfo();
                 try
@@ -292,6 +294,7 @@ namespace CodesysMcp
                 proj.close();
                 _snapshots.Clear();
                 _projectBaselines.Clear();
+                CodesysOnlineHelper.ClearDutMembersCache();
                 _autoBoundProjectPath = null;
                 _lastProjectDirty = false;
                 _lastProjectFileWriteUtc = DateTime.MinValue;
@@ -697,13 +700,25 @@ namespace CodesysMcp
                     foreach (var diag in diagrams) diagCount++;
                 }
 
+                var cfg = new TraceControlResult();
+                PlcTraceAndLoggerHelper.PopulateTraceConfiguration(traceExt, cfg);
+
                 return new
                 {
                     success = true,
                     traceName = traceName ?? "Trace",
                     variableCount = variables.Count,
                     variables,
-                    diagramCount = diagCount
+                    diagramCount = diagCount,
+                    cfg.taskName,
+                    cfg.triggerEnabled,
+                    cfg.triggerVariable,
+                    cfg.triggerEdge,
+                    cfg.triggerLevel,
+                    cfg.postTriggerSamples,
+                    cfg.recordCondition,
+                    cfg.everyNCycles,
+                    cfg.autoStart
                 };
             });
         }
@@ -713,9 +728,38 @@ namespace CodesysMcp
             return CodesysIdeUiHelper.GetIndicatorInfo();
         }
 
-        public static TraceAnalysisResult AnalyzeTrace(string filePath, double deadband = 0.01, string filterCondition = null)
+        public static IdeScreenshotResult CaptureIdeScreenshot(string outputPath = null, int maxWidth = 0)
         {
-            return PlcTraceAndLoggerHelper.AnalyzeTraceFile(filePath, deadband, filterCondition);
+            return CodesysIdeUiHelper.CaptureIdeScreenshot(outputPath, maxWidth);
+        }
+
+        public static TraceControlResult ControlTrace(
+            string traceName = "Trace",
+            string action = "status",
+            TraceTriggerConfigOptions triggerOptions = null)
+        {
+            return PlcTraceAndLoggerHelper.ControlTrace(traceName, action, triggerOptions);
+        }
+
+        public static TraceAnalysisResult AnalyzeTrace(
+            string filePath,
+            double deadband = 0.01,
+            string filterCondition = null,
+            bool includeSeries = false,
+            double? startMs = null,
+            double? endMs = null,
+            int maxPoints = 0,
+            string traceName = null)
+        {
+            return PlcTraceAndLoggerHelper.AnalyzeTraceFile(
+                filePath,
+                deadband,
+                filterCondition,
+                includeSeries,
+                startMs,
+                endMs,
+                maxPoints,
+                traceName);
         }
 
         public static PlcLoggerSetupResult SetupPlcLogger(int bufferSize = 64, string autoInjectPou = null)

@@ -87,6 +87,10 @@ namespace CodesysMcpTests
             Assert.IsFalse(DeviceLogonWatchdog.IsDeviceLogonTitle("MainForm"));
             Assert.IsFalse(DeviceLogonWatchdog.IsDeviceLogonTitle(""));
             Assert.IsFalse(DeviceLogonWatchdog.IsDeviceLogonTitle(null));
+
+            Assert.IsTrue(DeviceLogonWatchdog.IsConfirmPromptDialog("#32770", "CODESYS"));
+            Assert.IsFalse(DeviceLogonWatchdog.IsConfirmPromptDialog("WindowsForms10.Window.8.app.0", "CODESYS"));
+            Assert.IsFalse(DeviceLogonWatchdog.IsConfirmPromptDialog("#32770", "Other App"));
         }
     }
 }

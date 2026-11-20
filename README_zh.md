@@ -67,17 +67,20 @@ codesys-mcp-plugin/
 │   ├── CodesysOperations.SearchAndDiff.cs # 融合实时缓冲区的全局搜索、Diff 生成、预览与回滚
 │   ├── CodesysOperations.Mirror.cs      # 自适应 IDE -> .st 轮询镜像与保存自动 Git 提交钩子
 │   ├── McpServer.cs                     # Windows 命名管道全双工 JSON-RPC 2.0 服务端引擎
-│   ├── McpServer.Schemas.cs             # 全部 43 项已注册 MCP 工具 Schema 定义与参数校验
+│   ├── McpServer.Schemas.cs             # 全部 45 项已注册 MCP 工具 Schema 定义与参数校验
 │   ├── CodesysEditorBufferHelper.cs     # IDE 未保存 ST/宣言区编辑框内存缓冲区反射读取器
 │   ├── SourceMirrorHelper.cs            # 单向 .st 序列化器、SHA-256 差异防抖与 Git 集成
-│   ├── CodesysOnlineHelper.cs           # PLC 在线连接、变量读写、结构体/数组操作与 Trace 辅助
-│   ├── PlcTraceAndLoggerHelper.cs       # PLC 环形日志、设备系统日志与 Trace CSV/XML 分析
-│   ├── CodesysIdeUiHelper.cs            # IDE 状态栏指示灯、诊断卡片及镜像控制菜单
-│   ├── DeviceLogonWatchdog.cs           # Win32 原生模态登录弹窗看门狗守护
-│   └── ServerBootstrap.cs               # 供 IronPython 调用的静态启动入口
+│   ├── CodesysOnlineHelper.cs           # PLC 在线登录、运行控制与拓扑巡检
+│   ├── CodesysOnlineHelper.Variables.cs # 变量读写、失效句柄自动驱逐与强制控制
+│   ├── CodesysOnlineHelper.Batch.cs     # 原子批量写入、DUT 结构体与数组读写
+│   ├── PlcTraceAndLoggerHelper.cs       # Trace 启停、信号触发配置与 CSV/XML 波形分析
+│   ├── PlcTraceAndLoggerHelper.Logger.cs# PLC 环形黑匣子日志与在线 CmpLog 设备日志读取
+│   ├── CodesysIdeUiHelper.cs            # IDE 状态栏指示灯、诊断卡片及主窗口截图工具
+│   ├── DeviceLogonWatchdog.cs           # Win32 原生模态登录与确认弹窗看门狗守护
+│   └── ServerBootstrap.cs               # 供 IronPython 调用的静态启动与热重载交接入口
 ├── CodesysMcpCli/
 │   └── Program.cs                       # 全双工 stdin/stdout 管道转发与 EOF 在途响应排空引擎
-├── CodesysMcpTests/                     # C# 核心单元测试与真实 DLL 契约测试集（137 项测试）
+├── CodesysMcpTests/                     # C# 核心单元测试与真实 DLL 契约测试集（149 项测试）
 ├── tests/
 │   ├── test_cli_protocol.py             # 基于 Mock 命名管道的 CLI 协议、心跳与重连集成测试
 │   ├── test_codesys_e2e.py              # CODESYS 实时工程闭环 E2E 测试集
@@ -193,7 +196,7 @@ CODESYS Control（如 SoftPLC `CODESYS Control Win V3 x64`）通常启用了设�
 
 ---
 
-## 🛠️ 支持的 MCP 工具列表（共 43 项）
+## 🛠️ 支持的 MCP 工具列表（共 45 项）
 
 ### 1. 工程管理与导航
 | 工具名称 | 参数说明 | 功能描述 |
@@ -252,9 +255,10 @@ CODESYS Control（如 SoftPLC `CODESYS Control Win V3 x64`）通常启用了设�
 ### 6. 实时 Trace 示波器
 | 工具名称 | 参数说明 | 功能描述 |
 | :--- | :--- | :--- |
-| `add_trace_variable` | `variable: string`, `task?: string` | 向 Trace 示波器添加采样监测变量 |
-| `get_trace_info` | `trace_name?: string` | 获取当前 Trace 状态、已记录样本数与时间戳 |
-| `analyze_trace` | `trace_name?: string`, `metrics?: string[]` | 分析 Trace 采样数据（极值、变化率、稳态时间） |
+| `add_trace_variable` | `variable_name: string`, `trace_name?: string` | 向 Trace 示波器与图表添加采样监测变量 |
+| `get_trace_info` | `trace_name?: string` | 获取 Trace 变量列表、触发器配置与采样设置 |
+| `control_trace` | `action: string`, `trace_name?: string`, `trigger_enabled?`, `trigger_variable?`, `trigger_edge?`, `trigger_level?`, `post_trigger_samples?`, `record_condition?`, `every_n_cycles?`, `task_name?`, `auto_start?` | 控制 Trace 运行（`status`/`configure`/`download` 无弹窗强制覆盖/`start`/`stop`/`reset_trigger`）并配置硬件信号触发 |
+| `analyze_trace` | `file_path?: string`, `trace_name?: string`, `filter_condition?: string`, `deadband?: number`, `include_series?: bool`, `start_ms?: number`, `end_ms?: number`, `max_points?: int` | 自动导出并解析 `.trace` XML 或 `.csv` 数据（通道极值、跳变捕捉、条件检索与保峰降采样曲线） |
 
 ### 7. 日志系统集成
 | 工具名称 | 参数说明 | 功能描述 |
@@ -265,10 +269,11 @@ CODESYS Control（如 SoftPLC `CODESYS Control Win V3 x64`）通常启用了设�
 | `read_device_log` | `device?: string`, `max_entries?: int` | 读取设备系统级硬件/固件日志 |
 | `inject_code_log` | `pou: string`, `line: int`, `message: string` | 在指定代码位置安全注入调试跟踪日志 |
 
-### 8. IDE 状态栏与诊断卡
+### 8. IDE 状态栏、诊断卡与视觉验收
 | 工具名称 | 参数说明 | 功能描述 |
 | :--- | :--- | :--- |
 | `get_ui_indicator_status` | 无 | 获取 CODESYS 状态栏指示灯、心跳、请求总数与诊断卡状态 |
+| `capture_ide_screenshot` | `output_path?: string`, `max_width?: int` | 通过 Win32 `PrintWindow` 截取 CODESYS IDE 主窗口 PNG 图片用于视觉验收 |
 
 ---
 

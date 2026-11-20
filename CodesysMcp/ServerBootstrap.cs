@@ -23,6 +23,12 @@ namespace CodesysMcp
         {
             try
             {
+                var prevStop = AppDomain.CurrentDomain.GetData("CodesysMcp_ActiveServerStopAction") as Action;
+                if (prevStop != null)
+                {
+                    try { prevStop(); } catch { }
+                }
+
                 Console.WriteLine("[CodesysMcp] Initializing context with projects, system, and online...");
                 CodesysContext.Initialize(projects, system, online);
 
@@ -33,6 +39,7 @@ namespace CodesysMcp
 
                 _server = new McpServer(pipeName ?? McpServer.DefaultPipeName);
                 _server.Start();
+                AppDomain.CurrentDomain.SetData("CodesysMcp_ActiveServerStopAction", new Action(() => Stop()));
                 string banner = BuildStartupBanner(pipeName);
                 Console.WriteLine(banner);
                 CodesysContext.LogToIde(banner);

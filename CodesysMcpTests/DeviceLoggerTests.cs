@@ -174,5 +174,118 @@ namespace CodesysMcpTests
             string text = textObj["text"].ToString();
             Assert.IsTrue(text.Contains("HMI Start Command Received: Starting press cycle"));
         }
+
+        private class SimpleAsyncResult : IAsyncResult
+        {
+            public bool IsCompleted => true;
+            public System.Threading.WaitHandle AsyncWaitHandle => null;
+            public object AsyncState => null;
+            public bool CompletedSynchronously => true;
+        }
+
+        private class FakeLogEntry
+        {
+            public DateTime TimeStamp { get; set; }
+            public string Info { get; set; }
+            public uint CmpID { get; set; }
+            public uint InfoID { get; set; }
+            private readonly string _severity;
+            public FakeLogEntry(string sev) { _severity = sev; }
+            public string GetSeverity() => _severity;
+        }
+
+        private class FakeLoggerServiceHandler
+        {
+            public IAsyncResult BeginGetLoggerNames(AsyncCallback cb, object s) => new SimpleAsyncResult();
+            public string[] EndGetLoggerNames(IAsyncResult ar) => new[] { "PlcLog" };
+            public IAsyncResult BeginGetLoggerEntries(AsyncCallback cb, object s, uint h, DateTime ts, string name) => new SimpleAsyncResult();
+            public object[] EndGetLoggerEntries(IAsyncResult ar) => new object[]
+            {
+                new FakeLogEntry("Information") { TimeStamp = DateTime.UtcNow, Info = "HMI Start Command Received: Starting press cycle", CmpID = 10, InfoID = 1 },
+                new FakeLogEntry("Warning") { TimeStamp = DateTime.UtcNow, Info = "Watchdog Warning", CmpID = 20, InfoID = 2 }
+            };
+        }
+
+        private class FakeInternalOnlineDevice
+        {
+            public object CreateLoggerServiceHandler() => new FakeLoggerServiceHandler();
+        }
+
+        private class FakeScriptOnlineDeviceWrapper : IDisposable
+        {
+#pragma warning disable 0414
+            private readonly object OnlineDevice = new FakeInternalOnlineDevice();
+#pragma warning restore 0414
+            public bool Connected { get; private set; }
+            public bool Disposed { get; private set; }
+            public bool get_connected() => Connected;
+            public void connect() { Connected = true; }
+            public void Dispose() { Disposed = true; }
+        }
+
+        [TestMethod]
+        public void TestReadDeviceLogFromReflectedInternalOnlineDevice()
+        {
+            var wrapper = new FakeScriptOnlineDeviceWrapper();
+            var filtered = PlcTraceAndLoggerHelper.ReadDeviceLogFromOnlineDeviceObject(
+                wrapper,
+                severityFilter: null,
+                keyword: "HMI Start",
+                componentFilter: null,
+                maxEntries: 10,
+                saveToPath: null);
+
+            Assert.IsTrue(filtered.success, "Reflected online device log read must succeed");
+            Assert.IsTrue(wrapper.Connected, "Should ensure connection when get_connected() is false");
+            Assert.AreEqual(2, filtered.totalEntries);
+            Assert.AreEqual(1, filtered.infoCount);
+            Assert.AreEqual(1, filtered.warningCount);
+            Assert.AreEqual(1, filtered.entries.Count);
+            Assert.IsTrue(filtered.entries[0].message.Contains("HMI Start"));
+        }
+
+        private class PendingAsyncResult : IAsyncResult
+        {
+            public bool IsCompleted => false;
+            public System.Threading.WaitHandle AsyncWaitHandle => null;
+            public object AsyncState => null;
+            public bool CompletedSynchronously => false;
+        }
+
+        private class TimeoutLoggerServiceHandler
+        {
+            public int EndNamesCalls;
+            public IAsyncResult BeginGetLoggerNames(AsyncCallback cb, object s) => new PendingAsyncResult();
+            public string[] EndGetLoggerNames(IAsyncResult ar) { EndNamesCalls++; return new[] { "PlcLog" }; }
+            public IAsyncResult BeginGetLoggerEntries(AsyncCallback cb, object s, uint h, DateTime ts, string name) => new PendingAsyncResult();
+            public object[] EndGetLoggerEntries(IAsyncResult ar) => new object[0];
+        }
+
+        private class TimeoutOnlineDevice
+        {
+            private readonly object _handler;
+            public TimeoutOnlineDevice(object handler) { _handler = handler; }
+            public object CreateLoggerServiceHandler() => _handler;
+        }
+
+        [TestMethod]
+        public void TestReadDeviceLogAsyncTimeoutDoesNotDeadlockOrCallEnd()
+        {
+            var handler = new TimeoutLoggerServiceHandler();
+            var dev = new TimeoutOnlineDevice(handler);
+            int origTimeout = PlcTraceAndLoggerHelper.LoggerAsyncWaitTimeoutMs;
+            PlcTraceAndLoggerHelper.LoggerAsyncWaitTimeoutMs = 60;
+            try
+            {
+                var res = PlcTraceAndLoggerHelper.ReadDeviceLogFromOnlineDeviceObject(dev);
+                Assert.IsFalse(res.success, "Pending IAsyncResult must time out cleanly");
+                Assert.Contains("Timed out", res.message);
+                Assert.AreEqual(0, handler.EndNamesCalls, "EndGetLoggerNames must not be invoked after wait timeout");
+            }
+            finally
+            {
+                PlcTraceAndLoggerHelper.LoggerAsyncWaitTimeoutMs = origTimeout;
+            }
+        }
     }
 }

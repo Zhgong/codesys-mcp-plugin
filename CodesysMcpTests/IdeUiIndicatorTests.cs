@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using CodesysMcp;
@@ -144,7 +146,7 @@ namespace CodesysMcpTests
         {
             string version = CodesysIdeUiHelper.GetServerVersion();
             Assert.IsNotNull(version, "Server version should not be null");
-            Assert.AreEqual("1.3.0", version, "Version should match assembly and VERSION file (1.3.0)");
+            Assert.AreEqual("1.4.0", version, "Version should match assembly and VERSION file (1.4.0)");
         }
 
         [TestMethod]
@@ -253,6 +255,65 @@ namespace CodesysMcpTests
                 Application.DoEvents();
 
                 Assert.IsTrue(closed || !form.Visible || form.IsDisposed, "Triggering CancelButton (Esc) must close form");
+            }
+        }
+
+        [TestMethod]
+        public void TestCaptureFormToPngAndMinimizeGuard()
+        {
+            string tempPng = Path.Combine(Path.GetTempPath(), "test_ide_cap_" + Guid.NewGuid().ToString("N") + ".png");
+            string tempPngMin = Path.Combine(Path.GetTempPath(), "test_ide_cap_min_" + Guid.NewGuid().ToString("N") + ".png");
+            try
+            {
+                using (var form = new Form())
+                {
+                    form.StartPosition = FormStartPosition.Manual;
+                    form.Location = new Point(-2000, -2000);
+                    form.Size = new Size(320, 200);
+                    form.BackColor = Color.Navy;
+                    form.Text = "Test CODESYS Form";
+                    form.ShowInTaskbar = false;
+
+                    var panel = new Panel
+                    {
+                        BackColor = Color.Crimson,
+                        Location = new Point(20, 20),
+                        Size = new Size(120, 80)
+                    };
+                    form.Controls.Add(panel);
+                    form.Show();
+                    Application.DoEvents();
+
+                    var res = CodesysIdeUiHelper.CaptureFormToPng(form, tempPng, maxWidth: 160);
+                    Assert.IsTrue(res.success, "CaptureFormToPng should succeed on visible form: " + res.message);
+                    Assert.IsTrue(File.Exists(tempPng), "Output PNG must exist on disk");
+                    Assert.AreEqual(160, res.width);
+                    Assert.AreEqual(100, res.height);
+                    Assert.IsTrue(res.fileSizeBytes > 100);
+
+                    byte[] bytes = File.ReadAllBytes(tempPng);
+                    Assert.AreEqual((byte)0x89, bytes[0]);
+                    Assert.AreEqual((byte)0x50, bytes[1]);
+                    Assert.AreEqual((byte)0x4E, bytes[2]);
+                    Assert.AreEqual((byte)0x47, bytes[3]);
+
+                    using (var bmp = new Bitmap(tempPng))
+                    {
+                        Color c = bmp.GetPixel(40, 40);
+                        Assert.IsTrue(c.R > 80 || c.B > 80, "Captured pixels must reflect rendered UI colors rather than empty black");
+                    }
+
+                    form.WindowState = FormWindowState.Minimized;
+                    Application.DoEvents();
+                    var minRes = CodesysIdeUiHelper.CaptureFormToPng(form, tempPngMin, maxWidth: 0);
+                    Assert.IsFalse(minRes.success, "Minimized form must fail cleanly");
+                    Assert.IsTrue(minRes.message.IndexOf("minimized", StringComparison.OrdinalIgnoreCase) >= 0);
+                }
+            }
+            finally
+            {
+                try { if (File.Exists(tempPng)) File.Delete(tempPng); } catch { }
+                try { if (File.Exists(tempPngMin)) File.Delete(tempPngMin); } catch { }
             }
         }
     }

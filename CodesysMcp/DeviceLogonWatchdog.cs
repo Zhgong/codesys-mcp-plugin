@@ -11,6 +11,7 @@ namespace CodesysMcp
         private readonly int _targetThreadId;
         private readonly string _username;
         private readonly string _password;
+        private readonly bool _confirmGenericPrompts;
         private readonly Thread _watchThread;
         private volatile bool _stopRequested;
         private bool _dialogHandled;
@@ -49,16 +50,17 @@ namespace CodesysMcp
         private const int IDOK = 1;
         private const int IDCANCEL = 2;
 
-        public DeviceLogonWatchdog(int targetThreadId, string username, string password)
+        public DeviceLogonWatchdog(int targetThreadId, string username, string password, bool confirmGenericPrompts = false)
         {
             _targetThreadId = targetThreadId;
             _username = username ?? "admin";
             _password = password ?? "1111";
+            _confirmGenericPrompts = confirmGenericPrompts;
 
             _watchThread = new Thread(WatchLoop)
             {
                 IsBackground = true,
-                Name = "CodesysDeviceLogonWatchdog"
+                Name = confirmGenericPrompts ? "CodesysPromptConfirmWatchdog" : "CodesysDeviceLogonWatchdog"
             };
             _watchThread.Start();
         }
@@ -69,6 +71,12 @@ namespace CodesysMcp
             return title.IndexOf("Device User Logon", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    title.IndexOf("User Logon", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    (title.IndexOf("Logon", StringComparison.OrdinalIgnoreCase) >= 0 && title.IndexOf("Device", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        public static bool IsConfirmPromptDialog(string className, string title)
+        {
+            return string.Equals(className, "#32770", StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals((title ?? string.Empty).Trim(), "CODESYS", StringComparison.OrdinalIgnoreCase);
         }
 
         private void WatchLoop()
@@ -94,6 +102,17 @@ namespace CodesysMcp
                             HandleDialog(hWnd, title);
                             return false;
                         }
+
+                        if (_confirmGenericPrompts)
+                        {
+                            var sbClass = new StringBuilder(64);
+                            GetClassName(hWnd, sbClass, 64);
+                            if (IsConfirmPromptDialog(sbClass.ToString(), title))
+                            {
+                                HandleConfirmDialog(hWnd, title);
+                                return false;
+                            }
+                        }
                         return true;
                     }, IntPtr.Zero);
 
@@ -105,6 +124,34 @@ namespace CodesysMcp
 
                 Thread.Sleep(pollIntervalMs);
                 elapsedMs += pollIntervalMs;
+            }
+        }
+
+        private void HandleConfirmDialog(IntPtr hWnd, string title)
+        {
+            _dialogHandled = true;
+            CodesysContext.WriteToSessionLog($"[WATCHDOG] Auto-confirming CODESYS modal dialog '{title}' on UI Thread {_targetThreadId}.");
+            try
+            {
+                string[] okCaptions = new[] { "确定", "OK", "是", "Yes", "&Yes", "&OK" };
+                IntPtr hBtn = IntPtr.Zero;
+                foreach (string cap in okCaptions)
+                {
+                    hBtn = FindWindowEx(hWnd, IntPtr.Zero, "Button", cap);
+                    if (hBtn != IntPtr.Zero) break;
+                }
+                if (hBtn != IntPtr.Zero)
+                {
+                    PostMessage(hBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                }
+                else
+                {
+                    PostMessage(hWnd, WM_COMMAND, new IntPtr(IDOK), IntPtr.Zero);
+                }
+            }
+            catch (Exception ex)
+            {
+                CodesysContext.WriteToSessionLog($"[WATCHDOG] Error auto-confirming dialog '{title}': {ex.Message}");
             }
         }
 
