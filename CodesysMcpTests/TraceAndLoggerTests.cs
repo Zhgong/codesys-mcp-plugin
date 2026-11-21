@@ -146,6 +146,10 @@ namespace CodesysMcpTests
             var resMissing = PlcTraceAndLoggerHelper.AnalyzeTraceFile("C:\\NonExistentFile.trace");
             Assert.IsFalse(resMissing.success);
 
+            var resOfflineLive = PlcTraceAndLoggerHelper.AnalyzeTraceFile(null, traceName: "Trace");
+            Assert.IsFalse(resOfflineLive.success);
+            Assert.Contains("no CODESYS project is open", resOfflineLive.message);
+
             var resSetup = PlcTraceAndLoggerHelper.SetupPlcLoggerOfflineSafe();
             Assert.IsFalse(resSetup.success);
 
@@ -216,6 +220,12 @@ namespace CodesysMcpTests
             Assert.AreEqual(500.0, res.timestamps[49], 0.001);
 
             Assert.IsNotNull(res.series);
+            var forceStats = res.channelStats["Application.MOTION_PRG.rForce"];
+            Assert.AreEqual(-123.5, forceStats.minValue, 0.001);
+            Assert.AreEqual(375.0, forceStats.minTimestampMs, 0.001);
+            Assert.AreEqual(9999.5, forceStats.maxValue, 0.001);
+            Assert.AreEqual(250.0, forceStats.maxTimestampMs, 0.001);
+
             var forceSeries = res.series["Application.MOTION_PRG.rForce"];
             Assert.AreEqual(50, forceSeries.Count);
             Assert.IsTrue(forceSeries.Contains(9999.5), "Downsampling must preserve max peak 9999.5");

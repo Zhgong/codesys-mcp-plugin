@@ -14,9 +14,12 @@ namespace CodesysMcp
     public partial class McpServer
     {
         public const string DefaultPipeName = "codesys_mcp_pipe";
+        public const int DefaultListenerConcurrency = 3;
         private readonly string _pipeName;
         private readonly JavaScriptSerializer _json;
-        private Thread _listenerThread;
+        private readonly object _lifecycleLock = new object();
+        private readonly List<Thread> _listenerThreads = new List<Thread>();
+        private ManualResetEventSlim _firstPipeReady;
         private volatile bool _isRunning;
 
         public McpServer(string pipeName = DefaultPipeName)
@@ -28,23 +31,46 @@ namespace CodesysMcp
 
         public void Start()
         {
-            if (_isRunning) return;
-
-            _isRunning = true;
-            _listenerThread = new Thread(PipeListenLoop)
+            ManualResetEventSlim readyEvent = null;
+            lock (_lifecycleLock)
             {
-                IsBackground = true,
-                Name = "CodesysMcpPipeListener"
-            };
-            _listenerThread.Start();
-            Console.WriteLine($"[CodesysMcp] Pure Stdio/Named-Pipe Server started on pipe: {_pipeName}");
+                if (_isRunning) return;
+
+                _isRunning = true;
+                _listenerThreads.Clear();
+                readyEvent = new ManualResetEventSlim(false);
+                _firstPipeReady = readyEvent;
+
+                for (int i = 0; i < DefaultListenerConcurrency; i++)
+                {
+                    var t = new Thread(PipeListenLoop)
+                    {
+                        IsBackground = true,
+                        Name = "CodesysMcpPipeListener-" + i
+                    };
+                    _listenerThreads.Add(t);
+                    t.Start();
+                }
+            }
+
+            try
+            {
+                readyEvent?.Wait(150);
+            }
+            catch { }
+            Console.WriteLine($"[CodesysMcp] Pure Stdio/Named-Pipe Server started on pipe: {_pipeName} (listeners={DefaultListenerConcurrency})");
         }
 
         public void Stop()
         {
-            if (!_isRunning) return;
-            _isRunning = false;
-            for (int i = 0; i < 3; i++)
+            lock (_lifecycleLock)
+            {
+                if (!_isRunning) return;
+                _isRunning = false;
+                _listenerThreads.Clear();
+            }
+
+            for (int i = 0; i < DefaultListenerConcurrency + 1; i++)
             {
                 try
                 {
@@ -73,6 +99,14 @@ namespace CodesysMcp
                             new SecurityIdentifier(WellKnownSidType.WorldSid, null),
                             PipeAccessRights.ReadWrite,
                             AccessControlType.Allow));
+                        var currentUser = WindowsIdentity.GetCurrent()?.User;
+                        if (currentUser != null)
+                        {
+                            pipeSecurity.AddAccessRule(new PipeAccessRule(
+                                currentUser,
+                                PipeAccessRights.FullControl,
+                                AccessControlType.Allow));
+                        }
                     }
                     catch { }
                     if (pipeSecurity != null)
@@ -97,6 +131,7 @@ namespace CodesysMcp
                             PipeOptions.None);
                     }
 
+                    _firstPipeReady?.Set();
                     server.WaitForConnection();
                     if (!_isRunning)
                     {

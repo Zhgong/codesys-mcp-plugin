@@ -67,7 +67,7 @@ codesys-mcp-plugin/
 │   ├── CodesysOperations.Compiler.cs    # Compilation & IDE message channel queries
 │   ├── CodesysOperations.SearchAndDiff.cs # Live-buffer search, diff generation, preview & rollback
 │   ├── CodesysOperations.Mirror.cs      # Adaptive IDE-to-.st mirror polling & Git commit hooks
-│   ├── McpServer.cs                     # Full-duplex Named Pipe JSON-RPC 2.0 protocol engine
+│   ├── McpServer.cs                     # Multi-instance Named Pipe JSON-RPC 2.0 protocol engine
 │   ├── McpServer.Schemas.cs             # Registered MCP tool definitions (45 tools) & dispatch schemas
 │   ├── CodesysEditorBufferHelper.cs     # Reflection reader for live unsaved ST/declaration editor buffers
 │   ├── SourceMirrorHelper.cs            # One-way .st serializer, SHA-256 diff guard & Git integration
@@ -81,7 +81,7 @@ codesys-mcp-plugin/
 │   └── ServerBootstrap.cs               # Entry point & cross-assembly hot-reload handoff
 ├── CodesysMcpCli/
 │   └── Program.cs                       # Full-duplex stdin/stdout pipe forwarder & EOF drain engine
-├── CodesysMcpTests/                     # C# unit & real-DLL contract test suite (149 tests)
+├── CodesysMcpTests/                     # C# unit & real-DLL contract test suite (150 tests)
 ├── tests/
 │   ├── test_cli_protocol.py             # Mock Named Pipe CLI protocol, heartbeat & reconnect tests
 │   ├── test_codesys_e2e.py              # Live CODESYS MCP E2E integration suite
@@ -258,7 +258,7 @@ This plugin incorporates a **three-tier safety architecture** providing silent, 
 | `add_trace_variable` | `variable_name: string`, `trace_name?: string` | Adds a variable to the active trace configuration and diagram. |
 | `get_trace_info` | `trace_name?: string` | Retrieves trace variable list, trigger settings, and recording configuration. |
 | `control_trace` | `action: string`, `trace_name?: string`, `trigger_enabled?`, `trigger_variable?`, `trigger_edge?`, `trigger_level?`, `post_trigger_samples?`, `record_condition?`, `every_n_cycles?`, `task_name?`, `auto_start?` | Controls Trace execution (`status`, `configure`, `download` with force-overwrite, `start`, `stop`, `reset_trigger`) and configures hardware/runtime triggers. |
-| `analyze_trace` | `file_path?: string`, `trace_name?: string`, `filter_condition?: string`, `deadband?: number`, `include_series?: bool`, `start_ms?: number`, `end_ms?: number`, `max_points?: int` | Exports and analyzes `.trace` XML or `.csv` data (channel stats, transitions, condition matches, and peak-preserving downsampled series). |
+| `analyze_trace` | `file_path?: string`, `trace_name?: string`, `filter_condition?: string`, `deadband?: number`, `include_series?: bool`, `start_ms?: number`, `end_ms?: number`, `max_points?: int` | Exports fresh `.trace` XML or parses `.csv` data (channel min/max & peak timestamps, transitions, condition matches, and peak-preserving downsampled series). |
 
 ### 7. Logging & Diagnostics
 | Tool Name | Arguments | Description |

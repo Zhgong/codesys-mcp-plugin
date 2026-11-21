@@ -66,7 +66,7 @@ codesys-mcp-plugin/
 │   ├── CodesysOperations.Compiler.cs    # 工程编译控制与 IDE 多通道消息读取
 │   ├── CodesysOperations.SearchAndDiff.cs # 融合实时缓冲区的全局搜索、Diff 生成、预览与回滚
 │   ├── CodesysOperations.Mirror.cs      # 自适应 IDE -> .st 轮询镜像与保存自动 Git 提交钩子
-│   ├── McpServer.cs                     # Windows 命名管道全双工 JSON-RPC 2.0 服务端引擎
+│   ├── McpServer.cs                     # Windows 多实例命名管道全双工 JSON-RPC 2.0 服务端引擎
 │   ├── McpServer.Schemas.cs             # 全部 45 项已注册 MCP 工具 Schema 定义与参数校验
 │   ├── CodesysEditorBufferHelper.cs     # IDE 未保存 ST/宣言区编辑框内存缓冲区反射读取器
 │   ├── SourceMirrorHelper.cs            # 单向 .st 序列化器、SHA-256 差异防抖与 Git 集成
@@ -80,7 +80,7 @@ codesys-mcp-plugin/
 │   └── ServerBootstrap.cs               # 供 IronPython 调用的静态启动与热重载交接入口
 ├── CodesysMcpCli/
 │   └── Program.cs                       # 全双工 stdin/stdout 管道转发与 EOF 在途响应排空引擎
-├── CodesysMcpTests/                     # C# 核心单元测试与真实 DLL 契约测试集（149 项测试）
+├── CodesysMcpTests/                     # C# 核心单元测试与真实 DLL 契约测试集（150 项测试）
 ├── tests/
 │   ├── test_cli_protocol.py             # 基于 Mock 命名管道的 CLI 协议、心跳与重连集成测试
 │   ├── test_codesys_e2e.py              # CODESYS 实时工程闭环 E2E 测试集
@@ -258,7 +258,7 @@ CODESYS Control（如 SoftPLC `CODESYS Control Win V3 x64`）通常启用了设�
 | `add_trace_variable` | `variable_name: string`, `trace_name?: string` | 向 Trace 示波器与图表添加采样监测变量 |
 | `get_trace_info` | `trace_name?: string` | 获取 Trace 变量列表、触发器配置与采样设置 |
 | `control_trace` | `action: string`, `trace_name?: string`, `trigger_enabled?`, `trigger_variable?`, `trigger_edge?`, `trigger_level?`, `post_trigger_samples?`, `record_condition?`, `every_n_cycles?`, `task_name?`, `auto_start?` | 控制 Trace 运行（`status`/`configure`/`download` 无弹窗强制覆盖/`start`/`stop`/`reset_trigger`）并配置硬件信号触发 |
-| `analyze_trace` | `file_path?: string`, `trace_name?: string`, `filter_condition?: string`, `deadband?: number`, `include_series?: bool`, `start_ms?: number`, `end_ms?: number`, `max_points?: int` | 自动导出并解析 `.trace` XML 或 `.csv` 数据（通道极值、跳变捕捉、条件检索与保峰降采样曲线） |
+| `analyze_trace` | `file_path?: string`, `trace_name?: string`, `filter_condition?: string`, `deadband?: number`, `include_series?: bool`, `start_ms?: number`, `end_ms?: number`, `max_points?: int` | 自动覆盖导出最新 `.trace` XML 或解析 `.csv` 数据（通道极值与峰值时间戳、跳变捕捉、条件检索与保峰降采样曲线） |
 
 ### 7. 日志系统集成
 | 工具名称 | 参数说明 | 功能描述 |

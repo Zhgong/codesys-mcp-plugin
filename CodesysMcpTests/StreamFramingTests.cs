@@ -78,5 +78,31 @@ namespace CodesysMcpTests
                 Assert.IsNull(McpServer.ReadLineFromPipe(ms));
             }
         }
+
+        [TestMethod]
+        public void TestRapidSequentialNamedPipeConnectionsZeroEnonentGap()
+        {
+            string pipeName = "codesys_mcp_test_burst_" + Guid.NewGuid().ToString("N");
+            var server = new McpServer(pipeName);
+            server.Start();
+            try
+            {
+                for (int i = 1; i <= 30; i++)
+                {
+                    using (var client = new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut))
+                    {
+                        client.Connect(1000);
+                        McpServer.WriteLineToPipe(client, "{\"jsonrpc\":\"2.0\",\"id\":" + i + ",\"method\":\"ping\"}");
+                        string resp = McpServer.ReadLineFromPipe(client);
+                        Assert.IsNotNull(resp, $"Response {i} should not be null");
+                        Assert.IsTrue(resp.Contains("\"id\":" + i), $"Response {i} should match request id");
+                    }
+                }
+            }
+            finally
+            {
+                server.Stop();
+            }
+        }
     }
 }

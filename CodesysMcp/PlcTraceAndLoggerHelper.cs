@@ -16,6 +16,8 @@ namespace CodesysMcp
         public double finalValue { get; set; }
         public double minValue { get; set; }
         public double maxValue { get; set; }
+        public double minTimestampMs { get; set; }
+        public double maxTimestampMs { get; set; }
         public int changeCount { get; set; }
     }
 
@@ -495,6 +497,14 @@ namespace CodesysMcp
                 {
                     res.channelStats[ch].minValue = minValMap[ch];
                     res.channelStats[ch].maxValue = maxValMap[ch];
+                    if (minIdxMap[ch] >= 0 && minIdxMap[ch] < filteredTimes.Count)
+                    {
+                        res.channelStats[ch].minTimestampMs = filteredTimes[minIdxMap[ch]];
+                    }
+                    if (maxIdxMap[ch] >= 0 && maxIdxMap[ch] < filteredTimes.Count)
+                    {
+                        res.channelStats[ch].maxTimestampMs = filteredTimes[maxIdxMap[ch]];
+                    }
                 }
             }
 
@@ -1079,6 +1089,10 @@ namespace CodesysMcp
         private static string TryExportLiveTraceToFile(string traceName, string targetFilePath)
         {
             if (string.IsNullOrWhiteSpace(traceName)) return null;
+            if (CodesysContext.PrimaryProject == null)
+            {
+                throw new InvalidOperationException($"Cannot export live trace '{traceName}' when no CODESYS project is open.");
+            }
             return CodesysContext.RunOnPrimaryThread(() =>
             {
                 CodesysOnlineHelper.EnsureExecutionStack();
@@ -1099,6 +1113,11 @@ namespace CodesysMcp
                     Directory.CreateDirectory(dir);
                 }
 
+                if (File.Exists(outPath))
+                {
+                    try { File.Delete(outPath); } catch { }
+                }
+
                 saveMethod.Invoke(editorObj, new object[] { outPath });
                 return outPath;
             });
@@ -1115,7 +1134,10 @@ namespace CodesysMcp
             string traceName = null)
         {
             string exportedPath = null;
-            if ((string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) && !string.IsNullOrWhiteSpace(traceName))
+            bool hasTraceName = !string.IsNullOrWhiteSpace(traceName);
+            bool hasExistingFile = !string.IsNullOrWhiteSpace(filePath) && File.Exists(filePath);
+            bool shouldExportLive = hasTraceName && (CodesysContext.PrimaryProject != null || !hasExistingFile);
+            if (shouldExportLive)
             {
                 try
                 {

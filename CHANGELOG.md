@@ -2,6 +2,20 @@
 
 All notable changes to the `codesys-mcp-plugin` (CODESYS Native C# Stdio MCP Server) project will be documented in this file.
 
+## [1.4.1] - 2026-11-21
+
+### Fixed
+- **Multi-Instance Named Pipe Listener Pool (`McpServer`)**:
+  - Upgraded `PipeListenLoop` to run `DefaultListenerConcurrency = 3` concurrent listener threads, eliminating the 1–5 ms `ENOENT` (`FileNotFoundError`) window between sequential one-shot client connections.
+- **Live Trace Export Overwrite (`PlcTraceAndLoggerHelper.AnalyzeTraceFile`)**:
+  - When `trace_name` is supplied while a CODESYS project is open, `analyze_trace` now always exports fresh online Trace data (deleting any stale file at `file_path` first) instead of silently re-reading a previous run's file.
+
+### Added
+- **Peak Timestamp Telemetry (`TraceChannelStats`)**:
+  - Exposed `minTimestampMs` and `maxTimestampMs` on `TraceChannelStats` in `analyze_trace` results so callers can pinpoint peak force/stroke timing without pulling full `include_series` arrays.
+- **Engineering Wiki Updates (`wiki/03`, `wiki/04`)**:
+  - Documented hardware-triggered Trace automation, 3-layer silent overwrite, `MC_MoveVelocity` dual-FB alternating closed-loop control, `TIME()` scan delta timing, multi-instance Named Pipe concurrency, and SoftMotion 30-minute trial runtime reset practices.
+
 ## [1.4.0] - 2026-11-20
 
 ### Added
