@@ -1,0 +1,13 @@
+# .publicignore - Files and directories excluded from the public open-source repository
+# Internal wikis, development roadmaps, and business plans
+wiki/
+roadmap/
+docs/internal/
+.private/
+private_*.md
+
+# Security, credentials, and keys
+api_keys.json
+*.key
+*.pfx
+*secret*

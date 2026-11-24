@@ -1,0 +1,360 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Web.Script.Serialization;
+using CodesysMcp;
+
+namespace CodesysMcpTests
+{
+    public class ToolValidationTests
+    {
+        private readonly McpServer _server = new McpServer();
+        private readonly JavaScriptSerializer _json = new JavaScriptSerializer();
+
+        private Dictionary<string, object> Call(string requestJson)
+        {
+            object res = _server.ProcessJsonRpc(requestJson);
+            if (res == null) return null;
+            string serialized = _json.Serialize(res);
+            return _json.Deserialize<Dictionary<string, object>>(serialized);
+        }
+
+        [TestMethod]
+        public void TestToolsListReturnsAllTenTools()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 2, \"method\": \"tools/list\"}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result, "tools/list result should not be null");
+
+            var tools = result["tools"] as ArrayList;
+            Assert.IsNotNull(tools, "tools array should not be null");
+            Assert.AreEqual(45, tools.Count, "Expected exactly 45 registered tools");
+
+            var expectedTools = new HashSet<string>
+            {
+                "open_project",
+                "close_project",
+                "get_project_info",
+                "get_project_tree",
+                "read_pou",
+                "write_pou",
+                "create_folder",
+                "create_interface",
+                "create_method",
+                "create_property",
+                "delete_pou",
+                "compile_project",
+                "get_compiler_messages",
+                "get_message_categories",
+                "save_project",
+                "sync_sources_to_disk",
+                "search_code",
+                "get_diff",
+                "rollback_pou",
+                "get_ide_messages",
+                "preview_diff",
+                "create_boot_application",
+                "get_online_status",
+                "inspect_online",
+                "plc_login",
+                "plc_logout",
+                "plc_control",
+                "read_variables",
+                "write_variable",
+                "unforce_variables",
+                "add_trace_variable",
+                "get_trace_info",
+                "control_trace",
+                "batch_write_variables",
+                "write_struct",
+                "read_struct",
+                "read_array",
+                "get_ui_indicator_status",
+                "capture_ide_screenshot",
+                "analyze_trace",
+                "setup_plc_logger",
+                "read_plc_logs",
+                "setup_device_logger",
+                "inject_code_log",
+                "read_device_log"
+            };
+
+            foreach (Dictionary<string, object> tool in tools)
+            {
+                Assert.IsTrue(tool.ContainsKey("name"), "Tool must contain name");
+                Assert.IsTrue(tool.ContainsKey("description"), "Tool must contain description");
+                Assert.IsTrue(tool.ContainsKey("inputSchema"), "Tool must contain inputSchema");
+
+                string toolName = tool["name"]?.ToString();
+                Assert.IsTrue(expectedTools.Contains(toolName), $"Unexpected tool: {toolName}");
+                expectedTools.Remove(toolName);
+            }
+
+            Assert.AreEqual(0, expectedTools.Count, "All expected tools should have been present");
+
+            // Deprecated sync_disk_to_project stays hidden from tools/list, while direct tools/call fails gracefully with disabled=true.
+            var callRes = Call("{\"jsonrpc\": \"2.0\", \"id\": 201, \"method\": \"tools/call\", \"params\": {\"name\": \"sync_disk_to_project\", \"arguments\": {}}}");
+            Assert.IsNotNull(callRes);
+            var callResult = callRes["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(callResult);
+            var content = callResult["content"] as ArrayList;
+            Assert.IsNotNull(content);
+            Assert.IsTrue(content.Count > 0);
+            var firstItem = content[0] as Dictionary<string, object>;
+            var payload = _json.Deserialize<Dictionary<string, object>>(firstItem["text"]?.ToString() ?? "{}");
+            Assert.IsTrue(payload.ContainsKey("disabled") && Convert.ToBoolean(payload["disabled"]), "Direct call to sync_disk_to_project should still return disabled=true");
+        }
+
+        [TestMethod]
+        public void TestUnknownToolCallReturnsIsError()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 3, \"method\": \"tools/call\", \"params\": {\"name\": \"unknown_magic_tool\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]), "isError should be true for unknown tool");
+
+            var content = result["content"] as ArrayList;
+            Assert.IsNotNull(content);
+            var firstItem = content[0] as Dictionary<string, object>;
+            Assert.Contains("not recognized", firstItem["text"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestOpenProjectWithoutPathFailsValidation()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 4, \"method\": \"tools/call\", \"params\": {\"name\": \"open_project\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]), "isError should be true when missing 'path'");
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            Assert.Contains("path", firstItem["text"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestReadPouWithoutNameFailsValidation()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 5, \"method\": \"tools/call\", \"params\": {\"name\": \"read_pou\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]));
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            Assert.Contains("name", firstItem["text"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestWritePouWithoutNameFailsValidation()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 6, \"method\": \"tools/call\", \"params\": {\"name\": \"write_pou\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]));
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            Assert.Contains("name", firstItem["text"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestDeletePouWithoutNameFailsValidation()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 7, \"method\": \"tools/call\", \"params\": {\"name\": \"delete_pou\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]));
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            Assert.Contains("name", firstItem["text"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestSearchCodeWithoutQueryFailsValidation()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 8, \"method\": \"tools/call\", \"params\": {\"name\": \"search_code\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]), "isError should be true when missing 'query'");
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            Assert.Contains("query", firstItem["text"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestSearchCodeInvalidRegexReturnsError()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 9, \"method\": \"tools/call\", \"params\": {\"name\": \"search_code\", \"arguments\": {\"query\": \"[unclosed-regex(\", \"is_regex\": true}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]), "isError should be true on invalid regex pattern");
+        }
+
+        [TestMethod]
+        public void TestRollbackWithoutNameFailsValidation()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 12, \"method\": \"tools/call\", \"params\": {\"name\": \"rollback_pou\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]), "isError should be true when missing 'name'");
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            Assert.Contains("name", firstItem["text"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestGetDiffWithoutModificationsReturnsZeroCount()
+        {
+            CodesysOperations.ClearSnapshotsForTesting();
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 13, \"method\": \"tools/call\", \"params\": {\"name\": \"get_diff\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsFalse(Convert.ToBoolean(result["isError"]));
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            var json = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var diffRes = json.Deserialize<Dictionary<string, object>>(firstItem["text"]?.ToString());
+            Assert.AreEqual(0, Convert.ToInt32(diffRes["modifiedCount"]));
+        }
+
+        [TestMethod]
+        public void TestRollbackNonExistentSnapshotReturnsCleanMessage()
+        {
+            CodesysOperations.ClearSnapshotsForTesting();
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 14, \"method\": \"tools/call\", \"params\": {\"name\": \"rollback_pou\", \"arguments\": {\"name\": \"NonExistentPOU\"}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsFalse(Convert.ToBoolean(result["isError"]));
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            var json = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var rollbackRes = json.Deserialize<Dictionary<string, object>>(firstItem["text"]?.ToString());
+            Assert.IsFalse(Convert.ToBoolean(rollbackRes["success"]));
+            Assert.AreEqual("none", rollbackRes["action"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestGetIdeMessagesWithoutSystemReturnsEmptyList()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 15, \"method\": \"tools/call\", \"params\": {\"name\": \"get_ide_messages\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsFalse(Convert.ToBoolean(result["isError"]));
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            var json = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var msgRes = json.Deserialize<Dictionary<string, object>>(firstItem["text"]?.ToString());
+            Assert.IsTrue(msgRes.ContainsKey("messages"));
+            var messages = msgRes["messages"] as ArrayList;
+            Assert.IsNotNull(messages);
+            Assert.AreEqual(0, messages.Count);
+        }
+
+        [TestMethod]
+        public void TestPreviewDiffWithoutModificationsReturnsCleanMessage()
+        {
+            CodesysOperations.ClearSnapshotsForTesting();
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 16, \"method\": \"tools/call\", \"params\": {\"name\": \"preview_diff\", \"arguments\": {\"viewer\": \"none\"}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsFalse(Convert.ToBoolean(result["isError"]));
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            var json = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var prevRes = json.Deserialize<Dictionary<string, object>>(firstItem["text"]?.ToString());
+            Assert.IsTrue(Convert.ToBoolean(prevRes["success"]));
+            Assert.AreEqual(0, Convert.ToInt32(prevRes["modifiedCount"]));
+            Assert.IsTrue(prevRes["message"] != null && prevRes["message"].ToString().Contains("No modified POUs"));
+        }
+
+        [TestMethod]
+        public void TestAddTraceVariableWithoutVariableNameFailsValidation()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 17, \"method\": \"tools/call\", \"params\": {\"name\": \"add_trace_variable\", \"arguments\": {}}}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            Assert.IsNotNull(result);
+            Assert.IsTrue(Convert.ToBoolean(result["isError"]), "isError should be true when missing 'variable_name'");
+
+            var content = result["content"] as ArrayList;
+            var firstItem = content[0] as Dictionary<string, object>;
+            Assert.Contains("variable_name", firstItem["text"]?.ToString());
+        }
+
+        [TestMethod]
+        public void TestControlTraceSchemaIncludesTriggerConfigurationParameters()
+        {
+            var res = Call("{\"jsonrpc\": \"2.0\", \"id\": 18, \"method\": \"tools/list\"}");
+            Assert.IsNotNull(res);
+
+            var result = res["result"] as Dictionary<string, object>;
+            var tools = result["tools"] as ArrayList;
+            Dictionary<string, object> controlTraceTool = null;
+            foreach (Dictionary<string, object> tool in tools)
+            {
+                if (string.Equals(tool["name"]?.ToString(), "control_trace", StringComparison.Ordinal))
+                {
+                    controlTraceTool = tool;
+                    break;
+                }
+            }
+
+            Assert.IsNotNull(controlTraceTool, "control_trace tool must exist in tools/list");
+            var schema = controlTraceTool["inputSchema"] as Dictionary<string, object>;
+            var props = schema["properties"] as Dictionary<string, object>;
+            string[] expectedParams = new[]
+            {
+                "trace_name",
+                "action",
+                "trigger_enabled",
+                "trigger_variable",
+                "trigger_edge",
+                "trigger_level",
+                "post_trigger_samples",
+                "record_condition",
+                "every_n_cycles",
+                "task_name",
+                "auto_start"
+            };
+            foreach (string paramName in expectedParams)
+            {
+                Assert.IsTrue(props.ContainsKey(paramName), $"control_trace schema must expose '{paramName}'");
+            }
+        }
+    }
+}
