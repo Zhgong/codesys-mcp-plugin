@@ -89,6 +89,41 @@ namespace CodesysMcp
                 },
                 new
                 {
+                    name = "edit_pou",
+                    description = "Targeted search/replace edit on a POU, GVL, DUT, or Method without resending the whole file. Preserves unsaved IDE editor buffers and returns a Unified Diff.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            name = new { type = "string", description = "Name of the POU/object to edit (e.g. 'MOTION_PRG')" },
+                            section = new { type = "string", description = "Section for single edit: 'implementation' (default) or 'declaration'", @enum = new[] { "implementation", "declaration" } },
+                            target = new { type = "string", description = "Exact text block to find and replace (for single edit)" },
+                            replacement = new { type = "string", description = "Replacement text block (for single edit)" },
+                            allow_multiple = new { type = "boolean", description = "Allow replacing multiple occurrences (default: false; errors if ambiguous)" },
+                            edits = new
+                            {
+                                type = "array",
+                                description = "Optional list of edits ({section, target, replacement, allow_multiple}) to apply in one atomic call",
+                                items = new
+                                {
+                                    type = "object",
+                                    properties = new
+                                    {
+                                        section = new { type = "string", @enum = new[] { "implementation", "declaration" } },
+                                        target = new { type = "string" },
+                                        replacement = new { type = "string" },
+                                        allow_multiple = new { type = "boolean" }
+                                    },
+                                    required = new[] { "target", "replacement" }
+                                }
+                            }
+                        },
+                        required = new[] { "name" }
+                    }
+                },
+                new
+                {
                     name = "create_folder",
                     description = "Create a folder under active application or target parent folder in CODESYS project tree.",
                     inputSchema = new
@@ -364,7 +399,9 @@ namespace CodesysMcp
                             delete_foreign_apps = new { type = "boolean", description = "If true (default), automatically replaces conflicting applications on the PLC without modal confirmation dialogs." },
                             app_name = new { type = "string", description = "Optional target application name." },
                             username = new { type = "string", description = "Optional PLC Device User Logon username (calls online.set_default_credentials to avoid Device User Logon modal popup)." },
-                            password = new { type = "string", description = "Optional PLC Device User Logon password." }
+                            password = new { type = "string", description = "Optional PLC Device User Logon password." },
+                            ensure_running = new { type = "boolean", description = "If true, automatically starts the PLC application (RUN) if it is stopped after login." },
+                            auto_recover_exception = new { type = "boolean", description = "If true, automatically performs a full download recovery if the PLC is in an IEC Exception state." }
                         }
                     }
                 },
@@ -414,7 +451,7 @@ namespace CodesysMcp
                 new
                 {
                     name = "write_variable",
-                    description = "Write a value or force a variable in the running PLC/SoftPLC (useful for triggering inputs or injecting test signals).",
+                    description = "Write a value or force a variable in the running PLC/SoftPLC (supports automatic IEC enum symbol resolution, e.g. 'E_PressProfileId.PROFILE_STEEL_HEAVY').",
                     inputSchema = new
                     {
                         type = "object",
@@ -425,6 +462,43 @@ namespace CodesysMcp
                             force = new { type = "boolean", description = "If true, permanently forces the variable; if false, performs a single standard write." }
                         },
                         required = new[] { "name", "value" }
+                    }
+                },
+                new
+                {
+                    name = "pulse_variable",
+                    description = "Send a momentary pulse to a PLC variable (writes active_value, sleeps pulse_ms, then resets to inactive_value and verifies readback).",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            name = new { type = "string", description = "Variable expression/name (e.g. 'MOTION_PRG.bHmiStart')" },
+                            pulse_ms = new { type = "integer", description = "Pulse hold duration in milliseconds (default: 100, range: 10..10000)" },
+                            active_value = new { type = "string", description = "Active pulse value (default: 'TRUE')" },
+                            inactive_value = new { type = "string", description = "Inactive reset value (default: 'FALSE')" },
+                            pre_clear = new { type = "boolean", description = "If true, writes inactive_value first to guarantee a rising edge (default: false)" },
+                            force = new { type = "boolean", description = "Whether to force instead of normal write (default: false)" }
+                        },
+                        required = new[] { "name" }
+                    }
+                },
+                new
+                {
+                    name = "wait_for_variable",
+                    description = "Poll a PLC variable inside the CODESYS process until it satisfies a condition or times out, avoiding repeated MCP round-trips.",
+                    inputSchema = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            name = new { type = "string", description = "Variable expression/name (e.g. 'MOTION_PRG.eDispState')" },
+                            target_value = new { type = "string", description = "Target value or enum symbol to wait for (e.g. 'STATE_IDLE', '5000.0', 'TRUE')" },
+                            @operator = new { type = "string", description = "Comparison operator: '==', '!=', '>', '>=', '<', '<=', 'contains' (default: '==')", @enum = new[] { "==", "!=", ">", ">=", "<", "<=", "contains" } },
+                            timeout_ms = new { type = "integer", description = "Maximum wait time in milliseconds (default: 5000, max: 120000)" },
+                            poll_ms = new { type = "integer", description = "Polling interval in milliseconds (default: 50, range: 5..2000)" }
+                        },
+                        required = new[] { "name", "target_value" }
                     }
                 },
                 new

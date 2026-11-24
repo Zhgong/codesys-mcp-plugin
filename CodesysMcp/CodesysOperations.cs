@@ -476,9 +476,16 @@ namespace CodesysMcp
             return CodesysOnlineHelper.GetOnlineStatus();
         }
 
-        public static OnlineStatusResult PlcLogin(string mode = "try_online_change", bool deleteForeignApps = true, string appName = null, string username = null, string password = null)
+        public static OnlineStatusResult PlcLogin(
+            string mode = "try_online_change",
+            bool deleteForeignApps = true,
+            string appName = null,
+            string username = null,
+            string password = null,
+            bool ensureRunning = false,
+            bool autoRecoverException = false)
         {
-            return CodesysOnlineHelper.PlcLogin(mode, deleteForeignApps, appName, username, password);
+            return CodesysOnlineHelper.PlcLogin(mode, deleteForeignApps, appName, username, password, ensureRunning, autoRecoverException);
         }
 
         public static object InspectOnline(string targetName = "Device")
@@ -504,6 +511,27 @@ namespace CodesysMcp
         public static WriteVariableResult WriteVariable(string name, string value, bool force = false)
         {
             return CodesysOnlineHelper.WriteVariable(name, value, force);
+        }
+
+        public static PulseVariableResult PulseVariable(
+            string name,
+            int pulseMs = 100,
+            string activeValue = "TRUE",
+            string inactiveValue = "FALSE",
+            bool preClear = false,
+            bool force = false)
+        {
+            return CodesysOnlineHelper.PulseVariable(name, pulseMs, activeValue, inactiveValue, preClear, force);
+        }
+
+        public static WaitForVariableResult WaitForVariable(
+            string name,
+            string targetValue,
+            string op = "==",
+            int timeoutMs = 5000,
+            int pollMs = 50)
+        {
+            return CodesysOnlineHelper.WaitForVariable(name, targetValue, op, timeoutMs, pollMs);
         }
 
         public static OnlineStatusResult UnforceVariables(List<string> expressions = null)

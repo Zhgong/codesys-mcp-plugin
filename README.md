@@ -68,7 +68,7 @@ codesys-mcp-plugin/
 │   ├── CodesysOperations.SearchAndDiff.cs # Live-buffer search, diff generation, preview & rollback
 │   ├── CodesysOperations.Mirror.cs      # Adaptive IDE-to-.st mirror polling & Git commit hooks
 │   ├── McpServer.cs                     # Multi-instance Named Pipe JSON-RPC 2.0 protocol engine
-│   ├── McpServer.Schemas.cs             # Registered MCP tool definitions (45 tools) & dispatch schemas
+│   ├── McpServer.Schemas.cs             # Registered MCP tool definitions (48 tools) & dispatch schemas
 │   ├── CodesysEditorBufferHelper.cs     # Reflection reader for live unsaved ST/declaration editor buffers
 │   ├── SourceMirrorHelper.cs            # One-way .st serializer, SHA-256 diff guard & Git integration
 │   ├── CodesysOnlineHelper.cs           # Online PLC login, control & topology inspection
@@ -196,7 +196,7 @@ This plugin incorporates a **three-tier safety architecture** providing silent, 
 
 ---
 
-## 🛠️ Supported MCP Tools (45 Tools)
+## 🛠️ Supported MCP Tools (48 Tools)
 
 ### 1. Project Management & Navigation
 | Tool Name | Arguments | Description |
@@ -217,6 +217,7 @@ This plugin incorporates a **three-tier safety architecture** providing silent, 
 | :--- | :--- | :--- |
 | `read_pou` | `name: string` | Reads the declaration (`VAR...END_VAR`) and implementation (`ST`) of a POU, including live unsaved IDE editor buffers. |
 | `write_pou` | `name`, `declaration`, `implementation`, `type` | Creates or updates a POU (`Program`, `FunctionBlock`, or `Function`). |
+| `edit_pou` | `name`, `target`, `replacement`, `section?` / `edits?` | Performs targeted search/replace block edits without rewriting the entire POU, preserving live IDE buffers and returning a Unified Diff. |
 | `delete_pou` | `name: string` | Deletes a POU or object from the project. |
 | `search_code` | `query: string`, `is_regex?: bool`, `scope?: string` | Searches plain text or regex across all POUs, GVLs, and DUTs (including live unsaved IDE buffers) with line numbers and context. |
 | `get_diff` | `name?: string`, `section?: string` | Generates standard Unified Diff showing modifications made during the current session (including manual unsaved IDE edits). |
@@ -245,7 +246,9 @@ This plugin incorporates a **three-tier safety architecture** providing silent, 
 | Tool Name | Arguments | Description |
 | :--- | :--- | :--- |
 | `read_variables` | `names: string[]`, `application?: string` | Reads current online values and quality for scalar variables. |
-| `write_variable` | `name: string`, `value: string`, `force?: bool` | Writes variable values or forces values online. |
+| `write_variable` | `name: string`, `value: string`, `force?: bool` | Writes variable values (with automatic IEC enum symbol resolution) or forces values online. |
+| `pulse_variable` | `name: string`, `pulse_ms?: int`, `pre_clear?: bool` | Sends a momentary pulse (`active_value -> wait -> inactive_value`) with readback verification. |
+| `wait_for_variable` | `name: string`, `target_value: string`, `operator?`, `timeout_ms?` | Polls a PLC variable in-process until the condition matches or times out. |
 | `batch_write_variables` | `variables: object` | Atomically writes multiple variables in a single batch. |
 | `unforce_variables` | `names: string[]` | Unforces active variable overrides. |
 | `read_struct` | `name: string`, `application?: string` | Reads all field members and live values of a complex DUT struct. |

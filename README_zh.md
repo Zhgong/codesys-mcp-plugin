@@ -67,7 +67,7 @@ codesys-mcp-plugin/
 │   ├── CodesysOperations.SearchAndDiff.cs # 融合实时缓冲区的全局搜索、Diff 生成、预览与回滚
 │   ├── CodesysOperations.Mirror.cs      # 自适应 IDE -> .st 轮询镜像与保存自动 Git 提交钩子
 │   ├── McpServer.cs                     # Windows 多实例命名管道全双工 JSON-RPC 2.0 服务端引擎
-│   ├── McpServer.Schemas.cs             # 全部 45 项已注册 MCP 工具 Schema 定义与参数校验
+│   ├── McpServer.Schemas.cs             # 全部 48 项已注册 MCP 工具 Schema 定义与参数校验
 │   ├── CodesysEditorBufferHelper.cs     # IDE 未保存 ST/宣言区编辑框内存缓冲区反射读取器
 │   ├── SourceMirrorHelper.cs            # 单向 .st 序列化器、SHA-256 差异防抖与 Git 集成
 │   ├── CodesysOnlineHelper.cs           # PLC 在线登录、运行控制与拓扑巡检
@@ -196,7 +196,7 @@ CODESYS Control（如 SoftPLC `CODESYS Control Win V3 x64`）通常启用了设�
 
 ---
 
-## 🛠️ 支持的 MCP 工具列表（共 45 项）
+## 🛠️ 支持的 MCP 工具列表（共 48 项）
 
 ### 1. 工程管理与导航
 | 工具名称 | 参数说明 | 功能描述 |
@@ -217,6 +217,7 @@ CODESYS Control（如 SoftPLC `CODESYS Control Win V3 x64`）通常启用了设�
 | :--- | :--- | :--- |
 | `read_pou` | `name: string` | 读取指定 POU 的声明区 (`VAR...END_VAR`) 和实现区 (`ST` 代码)，自动融合 IDE 未保存实时编辑缓冲区 |
 | `write_pou` | `name`, `declaration`, `implementation`, `type` | 创建新 POU 或更新已有 POU 的声明区和实现区代码 |
+| `edit_pou` | `name`, `target`, `replacement`, `section?` / `edits?` | 局部精准搜索/替换修改 POU（无需重传全文），自动融合 IDE 实时未保存缓冲区并返回 Unified Diff |
 | `delete_pou` | `name: string` | 从工程中安全删除指定的 POU 对象 |
 | `search_code` | `query: string`, `is_regex?: bool`, `scope?: string` | 全局搜索普通文本或正则表达式（包含 IDE 未保存实时缓冲区），精准返回 1-based 行号及上下文 |
 | `get_diff` | `name?: string`, `section?: string` | 生成当前会话中对 POU 改动的标准 Unified Diff 对比报告（包含 IDE 手工未保存修改） |
@@ -245,7 +246,9 @@ CODESYS Control（如 SoftPLC `CODESYS Control Win V3 x64`）通常启用了设�
 | 工具名称 | 参数说明 | 功能描述 |
 | :--- | :--- | :--- |
 | `read_variables` | `names: string[]`, `application?: string` | 读取标量变量当前在线数值与质量状态 |
-| `write_variable` | `name: string`, `value: string`, `force?: bool` | 写入单个变量数值或执行在线强制 (Force) |
+| `write_variable` | `name: string`, `value: string`, `force?: bool` | 写入单个变量数值（支持 IEC 枚举符号名自动解析）或执行在线强制 (Force) |
+| `pulse_variable` | `name: string`, `pulse_ms?: int`, `pre_clear?: bool` | 向 PLC 变量发送瞬时脉冲（`置位 -> 保持 -> 复位`）并校验回读 |
+| `wait_for_variable` | `name: string`, `target_value: string`, `operator?`, `timeout_ms?` | 在进程内高频轮询变量直到满足条件或超时返回，避免多次客户端往返 |
 | `batch_write_variables` | `variables: object` | 原子性批量写入多个变量 |
 | `unforce_variables` | `names: string[]` | 解除变量的在线强制状态 |
 | `read_struct` | `name: string`, `application?: string` | 读取复杂结构体 (DUT) 的所有成员字段与在线数值 |

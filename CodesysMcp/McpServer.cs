@@ -377,6 +377,39 @@ namespace CodesysMcp
                     string type = args.ContainsKey("type") ? args["type"]?.ToString() : "Program";
                     return CodesysOperations.WritePou(pouName, decl, impl, type);
 
+                case "edit_pou":
+                    if (!args.ContainsKey("name") || string.IsNullOrWhiteSpace(args["name"]?.ToString()))
+                        throw new ArgumentException("Parameter 'name' is required.");
+                    string editPouName = args["name"].ToString();
+                    var editOps = new List<PouEditOperation>();
+                    if (args.ContainsKey("edits") && args["edits"] is System.Collections.IEnumerable editsEnum)
+                    {
+                        foreach (var item in editsEnum)
+                        {
+                            if (item is Dictionary<string, object> dict)
+                            {
+                                editOps.Add(new PouEditOperation
+                                {
+                                    section = dict.ContainsKey("section") && dict["section"] != null ? dict["section"].ToString() : "implementation",
+                                    target = dict.ContainsKey("target") ? dict["target"]?.ToString() : null,
+                                    replacement = dict.ContainsKey("replacement") ? dict["replacement"]?.ToString() : "",
+                                    allowMultiple = dict.ContainsKey("allow_multiple") && Convert.ToBoolean(dict["allow_multiple"])
+                                });
+                            }
+                        }
+                    }
+                    else if (args.ContainsKey("target"))
+                    {
+                        editOps.Add(new PouEditOperation
+                        {
+                            section = args.ContainsKey("section") && args["section"] != null ? args["section"].ToString() : "implementation",
+                            target = args["target"]?.ToString(),
+                            replacement = args.ContainsKey("replacement") ? args["replacement"]?.ToString() : "",
+                            allowMultiple = args.ContainsKey("allow_multiple") && Convert.ToBoolean(args["allow_multiple"])
+                        });
+                    }
+                    return CodesysOperations.EditPou(editPouName, editOps);
+
                 case "delete_pou":
                     if (!args.ContainsKey("name")) throw new ArgumentException("Parameter 'name' is required.");
                     return new { deleted = CodesysOperations.DeletePou(args["name"].ToString()) };
@@ -483,7 +516,9 @@ namespace CodesysMcp
                     bool delForeign = !args.ContainsKey("delete_foreign_apps") || Convert.ToBoolean(args["delete_foreign_apps"]);
                     string devUser = args.ContainsKey("username") ? args["username"]?.ToString() : null;
                     string devPass = args.ContainsKey("password") ? args["password"]?.ToString() : null;
-                    return CodesysOperations.PlcLogin(loginMode, delForeign, loginApp, devUser, devPass);
+                    bool ensureRun = args.ContainsKey("ensure_running") && Convert.ToBoolean(args["ensure_running"]);
+                    bool autoRecover = args.ContainsKey("auto_recover_exception") && Convert.ToBoolean(args["auto_recover_exception"]);
+                    return CodesysOperations.PlcLogin(loginMode, delForeign, loginApp, devUser, devPass, ensureRun, autoRecover);
                 case "inspect_online":
                     string inspectTarget = args.ContainsKey("target") ? args["target"]?.ToString() : "Device";
                     return CodesysOperations.InspectOnline(inspectTarget);
@@ -518,6 +553,29 @@ namespace CodesysMcp
                     string varVal = args.ContainsKey("value") ? args["value"]?.ToString() : "";
                     bool isForce = args.ContainsKey("force") && Convert.ToBoolean(args["force"]);
                     return CodesysOperations.WriteVariable(varName, varVal, isForce);
+
+                case "pulse_variable":
+                    if (!args.ContainsKey("name") || string.IsNullOrEmpty(args["name"]?.ToString()))
+                        throw new ArgumentException("Parameter 'name' is required.");
+                    string pVarName = args["name"].ToString();
+                    int pMs = args.ContainsKey("pulse_ms") && args["pulse_ms"] != null ? Convert.ToInt32(args["pulse_ms"]) : 100;
+                    string pAct = args.ContainsKey("active_value") && args["active_value"] != null ? args["active_value"].ToString() : "TRUE";
+                    string pInact = args.ContainsKey("inactive_value") && args["inactive_value"] != null ? args["inactive_value"].ToString() : "FALSE";
+                    bool pPreClear = args.ContainsKey("pre_clear") && Convert.ToBoolean(args["pre_clear"]);
+                    bool pForce = args.ContainsKey("force") && Convert.ToBoolean(args["force"]);
+                    return CodesysOperations.PulseVariable(pVarName, pMs, pAct, pInact, pPreClear, pForce);
+
+                case "wait_for_variable":
+                    if (!args.ContainsKey("name") || string.IsNullOrEmpty(args["name"]?.ToString()))
+                        throw new ArgumentException("Parameter 'name' is required.");
+                    if (!args.ContainsKey("target_value") || args["target_value"] == null)
+                        throw new ArgumentException("Parameter 'target_value' is required.");
+                    string wVarName = args["name"].ToString();
+                    string wTarget = args["target_value"].ToString();
+                    string wOp = args.ContainsKey("operator") && args["operator"] != null ? args["operator"].ToString() : "==";
+                    int wTimeout = args.ContainsKey("timeout_ms") && args["timeout_ms"] != null ? Convert.ToInt32(args["timeout_ms"]) : 5000;
+                    int wPoll = args.ContainsKey("poll_ms") && args["poll_ms"] != null ? Convert.ToInt32(args["poll_ms"]) : 50;
+                    return CodesysOperations.WaitForVariable(wVarName, wTarget, wOp, wTimeout, wPoll);
 
                 case "unforce_variables":
                     var unforceList = new List<string>();

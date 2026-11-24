@@ -30,7 +30,7 @@ namespace CodesysMcpTests
 
             var tools = result["tools"] as ArrayList;
             Assert.IsNotNull(tools, "tools array should not be null");
-            Assert.AreEqual(45, tools.Count, "Expected exactly 45 registered tools");
+            Assert.AreEqual(48, tools.Count, "Expected exactly 48 registered tools");
 
             var expectedTools = new HashSet<string>
             {
@@ -40,6 +40,7 @@ namespace CodesysMcpTests
                 "get_project_tree",
                 "read_pou",
                 "write_pou",
+                "edit_pou",
                 "create_folder",
                 "create_interface",
                 "create_method",
@@ -63,6 +64,8 @@ namespace CodesysMcpTests
                 "plc_control",
                 "read_variables",
                 "write_variable",
+                "pulse_variable",
+                "wait_for_variable",
                 "unforce_variables",
                 "add_trace_variable",
                 "get_trace_info",

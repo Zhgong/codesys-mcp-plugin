@@ -23,6 +23,12 @@ namespace CodesysMcp
         private static readonly Dictionary<string, List<string>> _dutMembersCache =
             new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
+        private static readonly Dictionary<string, Dictionary<string, int>> _enumValuesCache =
+            new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly Dictionary<string, int> _globalEnumMemberCache =
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
         public static int BatchVerifyRetryDelayMs { get; set; } = 50;
         public static int BatchVerifyMaxRetries { get; set; } = 3;
 
@@ -66,7 +72,224 @@ namespace CodesysMcp
             lock (_onlineCacheLock)
             {
                 _dutMembersCache.Clear();
+                _enumValuesCache.Clear();
+                _globalEnumMemberCache.Clear();
             }
+        }
+
+        public static void ClearEnumCache()
+        {
+            lock (_onlineCacheLock)
+            {
+                _enumValuesCache.Clear();
+                _globalEnumMemberCache.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Parses an IEC 61131-3 TYPE ... : ( ... ); END_TYPE enumeration declaration into member -> integer value pairs.
+        /// </summary>
+        public static Dictionary<string, int> ParseEnumDeclaration(string declaration)
+        {
+            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(declaration)) return result;
+
+            // Strip (* ... *) block comments and // ... line comments
+            string cleaned = Regex.Replace(declaration, @"\(\*[\s\S]*?\*\)", " ");
+            cleaned = Regex.Replace(cleaned, @"//[^\r\n]*", " ");
+
+            var bodyMatch = Regex.Match(cleaned, @"\(([\s\S]*?)\)");
+            if (!bodyMatch.Success) return result;
+
+            string body = bodyMatch.Groups[1].Value;
+            string[] items = body.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            int nextVal = 0;
+
+            foreach (string rawItem in items)
+            {
+                string item = rawItem.Trim();
+                if (string.IsNullOrEmpty(item)) continue;
+
+                var assignMatch = Regex.Match(item, @"^([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*(-?\d+)$");
+                if (assignMatch.Success)
+                {
+                    string member = assignMatch.Groups[1].Value.Trim();
+                    int val = int.Parse(assignMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    result[member] = val;
+                    nextVal = val + 1;
+                    continue;
+                }
+
+                var identMatch = Regex.Match(item, @"^([A-Za-z_][A-Za-z0-9_]*)$");
+                if (identMatch.Success)
+                {
+                    string member = identMatch.Groups[1].Value.Trim();
+                    result[member] = nextVal;
+                    nextVal++;
+                }
+            }
+
+            return result;
+        }
+
+        public static void SeedEnumDeclarationForTesting(string enumTypeName, string declaration)
+        {
+            if (string.IsNullOrWhiteSpace(enumTypeName)) return;
+            var parsed = ParseEnumDeclaration(declaration);
+            if (parsed.Count == 0) return;
+
+            lock (_onlineCacheLock)
+            {
+                _enumValuesCache[enumTypeName.Trim()] = parsed;
+                foreach (var kvp in parsed)
+                {
+                    _globalEnumMemberCache[kvp.Key] = kvp.Value;
+                }
+            }
+        }
+
+        private static Dictionary<string, int> GetOrLoadEnumMembers(string enumTypeName)
+        {
+            if (string.IsNullOrWhiteSpace(enumTypeName)) return null;
+            string key = enumTypeName.Trim();
+
+            lock (_onlineCacheLock)
+            {
+                if (_enumValuesCache.TryGetValue(key, out var cached))
+                    return cached;
+            }
+
+            try
+            {
+                var obj = CodesysOperations.FindObjectByName(key);
+                if (obj != null)
+                {
+                    var content = CodesysOperations.ReadPou(key, includeLiveEditorOverlay: true);
+                    var parsed = ParseEnumDeclaration(content?.declaration);
+                    if (parsed.Count > 0)
+                    {
+                        lock (_onlineCacheLock)
+                        {
+                            _enumValuesCache[key] = parsed;
+                            foreach (var kvp in parsed)
+                            {
+                                _globalEnumMemberCache[kvp.Key] = kvp.Value;
+                            }
+                        }
+                        return parsed;
+                    }
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private static string TryResolveExpressionType(string varExpression)
+        {
+            if (string.IsNullOrWhiteSpace(varExpression)) return null;
+            string cleanExpr = Regex.Replace(varExpression.Trim(), @"\[.*\]$", "");
+            string[] parts = cleanExpr.Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2) return null;
+
+            string currentContainer = parts[0];
+            for (int i = 1; i < parts.Length; i++)
+            {
+                try
+                {
+                    var obj = CodesysOperations.FindObjectByName(currentContainer);
+                    if (obj == null) return null;
+                    var content = CodesysOperations.ReadPou(currentContainer, includeLiveEditorOverlay: true);
+                    string resolved = TryResolveVariableTypeFromDeclaration(content?.declaration, parts[i]);
+                    if (string.IsNullOrEmpty(resolved)) return null;
+                    currentContainer = resolved;
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+            return currentContainer;
+        }
+
+        public static string ResolveEnumSymbolToIntString(string symbol)
+        {
+            if (string.IsNullOrWhiteSpace(symbol)) return null;
+            string s = symbol.Trim();
+
+            int dotIdx = s.IndexOf('.');
+            if (dotIdx > 0 && dotIdx < s.Length - 1)
+            {
+                string typeName = s.Substring(0, dotIdx).Trim();
+                string memberName = s.Substring(dotIdx + 1).Trim();
+                var map = GetOrLoadEnumMembers(typeName);
+                if (map != null && map.TryGetValue(memberName, out int intVal))
+                {
+                    return intVal.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+                return null;
+            }
+
+            if (Regex.IsMatch(s, @"^[A-Za-z_][A-Za-z0-9_]*$"))
+            {
+                lock (_onlineCacheLock)
+                {
+                    if (_globalEnumMemberCache.TryGetValue(s, out int intVal))
+                    {
+                        return intVal.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                    foreach (var map in _enumValuesCache.Values)
+                    {
+                        if (map.TryGetValue(s, out int val))
+                        {
+                            return val.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        }
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        public static string ResolveEnumValueForWrite(string varExpression, string rawValue)
+        {
+            if (string.IsNullOrWhiteSpace(rawValue)) return rawValue;
+            string trimmed = rawValue.Trim();
+
+            if (string.Equals(trimmed, "TRUE", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(trimmed, "FALSE", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("'", StringComparison.Ordinal) ||
+                trimmed.Contains("#") ||
+                double.TryParse(trimmed, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out _))
+            {
+                return rawValue;
+            }
+
+            // 1. Qualified EnumType.Member
+            if (trimmed.Contains("."))
+            {
+                string resolved = ResolveEnumSymbolToIntString(trimmed);
+                if (!string.IsNullOrEmpty(resolved)) return resolved;
+            }
+
+            // 2. Unqualified identifier: try variable's declared type first
+            if (Regex.IsMatch(trimmed, @"^[A-Za-z_][A-Za-z0-9_]*$"))
+            {
+                string declType = TryResolveExpressionType(varExpression);
+                if (!string.IsNullOrEmpty(declType))
+                {
+                    var map = GetOrLoadEnumMembers(declType);
+                    if (map != null && map.TryGetValue(trimmed, out int intVal))
+                    {
+                        return intVal.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                }
+
+                string globalResolved = ResolveEnumSymbolToIntString(trimmed);
+                if (!string.IsNullOrEmpty(globalResolved)) return globalResolved;
+            }
+
+            return rawValue;
         }
 
         public static int GetDutMembersCacheCountForTesting()
@@ -283,17 +506,18 @@ namespace CodesysMcp
                 if (setPrep == null)
                     throw new InvalidOperationException("Method 'set_prepared_value' not found.");
 
-                setPrep.Invoke(onlineApp, new object[] { name, value ?? string.Empty });
+                string effectiveValue = ResolveEnumValueForWrite(name, value ?? string.Empty);
+                setPrep.Invoke(onlineApp, new object[] { name, effectiveValue });
 
                 if (force)
                 {
                     _cachedForcePreparedValuesMethod?.Invoke(onlineApp, null);
-                    CodesysContext.LogToIde($"[FORCE] write_variable: Forced '{name}' := '{value}'");
+                    CodesysContext.LogToIde($"[FORCE] write_variable: Forced '{name}' := '{effectiveValue}'");
                 }
                 else
                 {
                     _cachedWritePreparedValuesMethod?.Invoke(onlineApp, null);
-                    CodesysContext.LogToIde($"[WRITE] write_variable: Wrote '{name}' := '{value}'");
+                    CodesysContext.LogToIde($"[WRITE] write_variable: Wrote '{name}' := '{effectiveValue}'");
                 }
 
                 string actual = null;
@@ -303,7 +527,7 @@ namespace CodesysMcp
                     actual = _cachedReadValueMethod?.Invoke(onlineApp, new object[] { name })?.ToString();
                     if (actual != null)
                     {
-                        verified = ValuesMatch(actual, value);
+                        verified = ValuesMatch(actual, effectiveValue) || ValuesMatch(actual, value);
                     }
                 }
                 catch { }
@@ -312,15 +536,153 @@ namespace CodesysMcp
                 {
                     success = true,
                     name = name,
-                    value = value,
+                    value = effectiveValue,
                     actualValue = actual,
                     verified = verified,
                     isForced = force,
                     message = force
-                        ? $"Variable '{name}' was forced to '{value}' (Readback: '{actual}', Verified: {verified})."
-                        : $"Variable '{name}' was written with value '{value}' (Readback: '{actual}', Verified: {verified})."
+                        ? $"Variable '{name}' was forced to '{effectiveValue}' (Readback: '{actual}', Verified: {verified})."
+                        : $"Variable '{name}' was written with value '{effectiveValue}' (Readback: '{actual}', Verified: {verified})."
                 };
             });
+        }
+
+        public static PulseVariableResult PulseVariable(
+            string name,
+            int pulseMs = 100,
+            string activeValue = "TRUE",
+            string inactiveValue = "FALSE",
+            bool preClear = false,
+            bool force = false)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Parameter 'name' is required.");
+
+            int clampedPulseMs = Math.Max(10, Math.Min(10000, pulseMs));
+            string actVal = string.IsNullOrEmpty(activeValue) ? "TRUE" : activeValue;
+            string inactVal = string.IsNullOrEmpty(inactiveValue) ? "FALSE" : inactiveValue;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            if (preClear)
+            {
+                WriteVariable(name, inactVal, force);
+            }
+
+            WriteVariable(name, actVal, force);
+            Thread.Sleep(clampedPulseMs);
+            var resetRes = WriteVariable(name, inactVal, force);
+            sw.Stop();
+
+            return new PulseVariableResult
+            {
+                success = resetRes.success,
+                name = name,
+                activeValue = actVal,
+                inactiveValue = inactVal,
+                pulseMs = clampedPulseMs,
+                elapsedMs = sw.ElapsedMilliseconds,
+                finalValue = resetRes.actualValue,
+                verified = resetRes.verified,
+                message = $"Pulsed '{name}' ({actVal} -> {inactVal} after {clampedPulseMs}ms, elapsed={sw.ElapsedMilliseconds}ms, verified={resetRes.verified})."
+            };
+        }
+
+        private static bool EvaluateWaitCondition(string actual, string target, string op)
+        {
+            string normOp = (op ?? "==").Trim().ToLowerInvariant();
+            if (normOp == "==" || normOp == "=" || normOp == "eq")
+            {
+                return ValuesMatch(actual, target);
+            }
+            if (normOp == "!=" || normOp == "<>" || normOp == "ne")
+            {
+                return !ValuesMatch(actual, target);
+            }
+            if (normOp == "contains")
+            {
+                return (actual ?? string.Empty).IndexOf(target ?? string.Empty, StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+
+            string normActual = NormalizeIecValue(actual);
+            string normTarget = NormalizeIecValue(target);
+            if (double.TryParse(normActual, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double dActual) &&
+                double.TryParse(normTarget, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double dTarget))
+            {
+                if (normOp == ">" || normOp == "gt") return dActual > dTarget;
+                if (normOp == ">=" || normOp == "ge") return dActual >= dTarget;
+                if (normOp == "<" || normOp == "lt") return dActual < dTarget;
+                if (normOp == "<=" || normOp == "le") return dActual <= dTarget;
+            }
+
+            throw new ArgumentException($"Unsupported wait operator '{op}' or non-numeric comparison ('{actual}' {op} '{target}').");
+        }
+
+        public static WaitForVariableResult WaitForVariable(
+            string name,
+            string targetValue,
+            string op = "==",
+            int timeoutMs = 5000,
+            int pollMs = 50)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Parameter 'name' is required.");
+            if (targetValue == null)
+                throw new ArgumentException("Parameter 'target_value' is required.");
+
+            int clampedTimeout = Math.Max(0, Math.Min(120000, timeoutMs));
+            int clampedPoll = Math.Max(5, Math.Min(2000, pollMs));
+            string normalizedOp = string.IsNullOrWhiteSpace(op) ? "==" : op.Trim();
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int samples = 0;
+            string lastVal = null;
+
+            while (true)
+            {
+                var readRes = ReadVariables(new List<string> { name });
+                samples++;
+                if (readRes.values != null && readRes.values.TryGetValue(name, out string val))
+                {
+                    lastVal = val;
+                    if (!IsStaleVarRefError(val) && EvaluateWaitCondition(val, targetValue, normalizedOp))
+                    {
+                        sw.Stop();
+                        return new WaitForVariableResult
+                        {
+                            success = true,
+                            matched = true,
+                            timedOut = false,
+                            name = name,
+                            targetValue = targetValue,
+                            op = normalizedOp,
+                            lastValue = lastVal,
+                            elapsedMs = sw.ElapsedMilliseconds,
+                            samplesCount = samples,
+                            message = $"Condition '{name} {normalizedOp} {targetValue}' matched in {sw.ElapsedMilliseconds}ms ({samples} sample(s), value='{lastVal}')."
+                        };
+                    }
+                }
+
+                if (sw.ElapsedMilliseconds >= clampedTimeout)
+                {
+                    sw.Stop();
+                    return new WaitForVariableResult
+                    {
+                        success = false,
+                        matched = false,
+                        timedOut = true,
+                        name = name,
+                        targetValue = targetValue,
+                        op = normalizedOp,
+                        lastValue = lastVal,
+                        elapsedMs = sw.ElapsedMilliseconds,
+                        samplesCount = samples,
+                        message = $"Timed out after {sw.ElapsedMilliseconds}ms waiting for '{name} {normalizedOp} {targetValue}' (last value='{lastVal}', samples={samples})."
+                    };
+                }
+
+                Thread.Sleep(clampedPoll);
+            }
         }
 
         public static OnlineStatusResult UnforceVariables(List<string> expressions = null)
@@ -538,8 +900,14 @@ namespace CodesysMcp
                 if (setPrep == null)
                     throw new InvalidOperationException("Method 'set_prepared_value' not found on online application.");
 
-                // Phase 1: Set prepared values in memory for single-cycle atomic write
+                var resolvedVars = new Dictionary<string, string>(vars.Count, StringComparer.OrdinalIgnoreCase);
                 foreach (var kvp in vars)
+                {
+                    resolvedVars[kvp.Key] = ResolveEnumValueForWrite(kvp.Key, kvp.Value ?? string.Empty);
+                }
+
+                // Phase 1: Set prepared values in memory for single-cycle atomic write
+                foreach (var kvp in resolvedVars)
                 {
                     var itemRes = new BatchWriteItemResult { target = kvp.Value };
                     result.details[kvp.Key] = itemRes;
@@ -560,12 +928,12 @@ namespace CodesysMcp
                     if (force)
                     {
                         _cachedForcePreparedValuesMethod?.Invoke(onlineApp, null);
-                        CodesysContext.LogToIde($"[FORCE] batch_write_variables: Forced {vars.Count} prepared values.");
+                        CodesysContext.LogToIde($"[FORCE] batch_write_variables: Forced {resolvedVars.Count} prepared values.");
                     }
                     else
                     {
                         _cachedWritePreparedValuesMethod?.Invoke(onlineApp, null);
-                        CodesysContext.LogToIde($"[WRITE] batch_write_variables: Wrote {vars.Count} prepared values atomically.");
+                        CodesysContext.LogToIde($"[WRITE] batch_write_variables: Wrote {resolvedVars.Count} prepared values atomically.");
                     }
                 }
                 catch (Exception ex)
@@ -579,7 +947,7 @@ namespace CodesysMcp
                 var readValMethod = _cachedReadValueMethod;
                 var readValuesMethod = _cachedReadValuesArrayMethod;
                 var pendingKeys = new List<string>();
-                foreach (var kvp in vars)
+                foreach (var kvp in resolvedVars)
                 {
                     var item = result.details[kvp.Key];
                     if (item.error != null) continue;
@@ -615,7 +983,7 @@ namespace CodesysMcp
                                 var item = result.details[key];
                                 string actual = batchVals[i];
                                 item.actual = actual;
-                                item.verified = ValuesMatch(actual, vars[key]);
+                                item.verified = ValuesMatch(actual, resolvedVars[key]);
                                 item.error = null;
                                 if (!item.verified)
                                 {
@@ -629,7 +997,7 @@ namespace CodesysMcp
                             foreach (var key in pendingKeys)
                             {
                                 var item = result.details[key];
-                                string targetVal = vars[key];
+                                string targetVal = resolvedVars[key];
                                 try
                                 {
                                     var actual = readValMethod.Invoke(onlineApp, new object[] { key })?.ToString();
@@ -657,7 +1025,7 @@ namespace CodesysMcp
                         pendingKeys = nextPending;
                     }
 
-                    foreach (var kvp in vars)
+                    foreach (var kvp in resolvedVars)
                     {
                         var item = result.details[kvp.Key];
                         if (item.error == null && item.verified)

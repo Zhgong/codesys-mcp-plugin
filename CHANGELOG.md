@@ -2,6 +2,19 @@
 
 All notable changes to the `codesys-mcp-plugin` (CODESYS Native C# Stdio MCP Server) project will be documented in this file.
 
+## [1.5.0] - 2026-11-24
+
+### Added
+- **Targeted POU Editing (`edit_pou`)**:
+  - Search/replace block editing with line-ending normalization (`\r\n`/`\n`), trailing-whitespace fallback, ambiguity guard (reporting conflicting line numbers), live IDE buffer preservation (`SynEdControl.Buffer`), and Unified Diff output.
+- **High-Frequency Online Primitives (`pulse_variable`, `wait_for_variable`)**:
+  - `pulse_variable`: Single-call momentary pulse (`pre_clear`, `active_value`, `pulse_ms`, `inactive_value`, readback verification).
+  - `wait_for_variable`: In-process high-frequency variable polling with comparison operators (`==`, `!=`, `>`, `>=`, `<`, `<=`, `contains`) and timeout control.
+- **Automatic IEC Enum Symbol Resolution (`CodesysOnlineHelper`)**:
+  - `write_variable`, `batch_write_variables`, `write_struct`, and `ValuesMatch` now automatically parse Enumeration DUT declarations and resolve qualified (`EnumType.Member`) or unqualified (`Member`) enum names to runtime integers.
+- **`plc_login` Self-Healing & Auto-Start (`ensure_running`, `auto_recover_exception`)**:
+  - Optional automatic recovery from PLC Exception state via full Download and automatic `start()` transition to `RUN`.
+
 ## [1.4.1] - 2026-11-21
 
 ### Fixed

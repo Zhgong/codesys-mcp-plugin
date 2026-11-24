@@ -27,6 +27,35 @@ namespace CodesysMcp
         public List<string> decodedOperationFlags { get; set; } = new List<string>();
         public string activeApplication { get; set; }
         public List<string> forcedExpressions { get; set; } = new List<string>();
+        public bool recoveredFromException { get; set; }
+        public bool autoStarted { get; set; }
+        public string message { get; set; }
+    }
+
+    public class PulseVariableResult
+    {
+        public bool success { get; set; }
+        public string name { get; set; }
+        public string activeValue { get; set; }
+        public string inactiveValue { get; set; }
+        public int pulseMs { get; set; }
+        public long elapsedMs { get; set; }
+        public string finalValue { get; set; }
+        public bool verified { get; set; }
+        public string message { get; set; }
+    }
+
+    public class WaitForVariableResult
+    {
+        public bool success { get; set; }
+        public bool matched { get; set; }
+        public bool timedOut { get; set; }
+        public string name { get; set; }
+        public string targetValue { get; set; }
+        public string op { get; set; }
+        public string lastValue { get; set; }
+        public long elapsedMs { get; set; }
+        public int samplesCount { get; set; }
         public string message { get; set; }
     }
 
@@ -127,6 +156,19 @@ namespace CodesysMcp
             {
                 return b1 == b2;
             }
+
+            // Bidirectional enum symbol resolution equivalence (e.g. "E_PressProfileId.PROFILE_STEEL_HEAVY" == "2" or "PROFILE_STEEL_HEAVY")
+            string shortActual = normActual.Contains(".") ? normActual.Substring(normActual.LastIndexOf('.') + 1).Trim() : normActual;
+            string shortTarget = normTarget.Contains(".") ? normTarget.Substring(normTarget.LastIndexOf('.') + 1).Trim() : normTarget;
+            if (string.Equals(shortActual, shortTarget, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            string enumActual = ResolveEnumSymbolToIntString(normActual);
+            string enumTarget = ResolveEnumSymbolToIntString(normTarget);
+            if (!string.IsNullOrEmpty(enumActual) && string.Equals(enumActual, enumTarget ?? normTarget, StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (!string.IsNullOrEmpty(enumTarget) && string.Equals(normActual, enumTarget, StringComparison.OrdinalIgnoreCase))
+                return true;
 
             return false;
         }
@@ -464,7 +506,59 @@ namespace CodesysMcp
             };
         }
 
-        public static OnlineStatusResult PlcLogin(string mode = "try_online_change", bool deleteForeignApps = true, string appName = null, string username = null, string password = null)
+        /// <summary>
+        /// Optionally recovers an online application from Exception state (via Download) and starts it if stopped.
+        /// Extracted as a testable helper for PlcLogin self-healing.
+        /// </summary>
+        public static OnlineStatusResult EnsureOnlineAppRunningAndHealthy(
+            object onlineApp,
+            OnlineStatusResult status,
+            bool ensureRunning,
+            bool autoRecoverException,
+            Func<OnlineStatusResult> downloadRecoveryCallback,
+            Func<OnlineStatusResult> statusRefreshCallback)
+        {
+            if (status == null || !status.isLoggedIn || onlineApp == null)
+                return status;
+
+            bool recovered = false;
+            bool autoStarted = false;
+
+            if (autoRecoverException && status.isException && downloadRecoveryCallback != null)
+            {
+                CodesysContext.LogToIde("[HEAL] plc_login: PLC is in Exception state; triggering download recovery...");
+                status = downloadRecoveryCallback() ?? status;
+                recovered = true;
+            }
+
+            if (ensureRunning && !string.Equals(status.applicationState, "run", StringComparison.OrdinalIgnoreCase))
+            {
+                var startMethod = onlineApp.GetType().GetMethod("start");
+                if (startMethod != null)
+                {
+                    startMethod.Invoke(onlineApp, null);
+                    autoStarted = true;
+                    CodesysContext.LogToIde("[HEAL] plc_login: Auto-started PLC execution (RUN).");
+                    if (statusRefreshCallback != null)
+                    {
+                        status = statusRefreshCallback() ?? status;
+                    }
+                }
+            }
+
+            status.recoveredFromException = recovered;
+            status.autoStarted = autoStarted;
+            return status;
+        }
+
+        public static OnlineStatusResult PlcLogin(
+            string mode = "try_online_change",
+            bool deleteForeignApps = true,
+            string appName = null,
+            string username = null,
+            string password = null,
+            bool ensureRunning = false,
+            bool autoRecoverException = false)
         {
             return CodesysContext.RunOnPrimaryThread(() =>
             {
@@ -532,6 +626,27 @@ namespace CodesysMcp
                     TryEvictOnlineVarRefs(onlineApp, null);
                     CodesysContext.LogToIde($"[STEP] plc_login: loginMethod.Invoke returned! Querying status...");
                     var status = GetOnlineStatus();
+
+                    if (ensureRunning || autoRecoverException)
+                    {
+                        status = EnsureOnlineAppRunningAndHealthy(
+                            onlineApp,
+                            status,
+                            ensureRunning,
+                            autoRecoverException,
+                            () =>
+                            {
+                                object downloadOpt = Enum.ToObject(param0Type, 0);
+                                using (new DeviceLogonWatchdog(win32ThreadId, creds.Username, creds.Password))
+                                {
+                                    loginMethod.Invoke(onlineApp, new object[] { downloadOpt, true });
+                                }
+                                TryEvictOnlineVarRefs(onlineApp, null);
+                                return GetOnlineStatus();
+                            },
+                            GetOnlineStatus);
+                    }
+
                     if (status.isLoggedIn)
                     {
                         CodesysContext.LogToIde($"[SUCCESS] plc_login: Connected to SoftPLC (State: {status.applicationState}, Operation: {status.operationState})");

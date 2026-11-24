@@ -9,6 +9,25 @@ using _3S.CoDeSys.ScriptEngine.BasicFunctionality;
 
 namespace CodesysMcp
 {
+    public class PouEditOperation
+    {
+        public string section { get; set; } = "implementation";
+        public string target { get; set; }
+        public string replacement { get; set; }
+        public bool allowMultiple { get; set; }
+    }
+
+    public class EditPouResult
+    {
+        public bool success { get; set; }
+        public string name { get; set; }
+        public int appliedEdits { get; set; }
+        public bool declarationModified { get; set; }
+        public bool implementationModified { get; set; }
+        public string diff { get; set; }
+        public string message { get; set; }
+    }
+
     public static partial class CodesysOperations
     {
         public static PouContentResult ReadPou(string name, bool includeLiveEditorOverlay = true)
@@ -390,6 +409,206 @@ namespace CodesysMcp
                     }
                 }
                 return true;
+            });
+        }
+
+        private static string NormalizeToLf(string text)
+        {
+            return (text ?? string.Empty).Replace("\r\n", "\n").Replace("\r", "\n");
+        }
+
+        private static int CountLineNumber(string lfText, int charIndex)
+        {
+            int line = 1;
+            int limit = Math.Min(charIndex, lfText.Length);
+            for (int i = 0; i < limit; i++)
+            {
+                if (lfText[i] == '\n') line++;
+            }
+            return line;
+        }
+
+        private static List<int> FindExactOccurrences(string haystack, string needle)
+        {
+            var indices = new List<int>();
+            int pos = 0;
+            while (pos <= haystack.Length - needle.Length)
+            {
+                int found = haystack.IndexOf(needle, pos, StringComparison.Ordinal);
+                if (found < 0) break;
+                indices.Add(found);
+                pos = found + Math.Max(1, needle.Length);
+            }
+            return indices;
+        }
+
+        /// <summary>
+        /// Applies a targeted search-and-replace block edit with LF normalization and trailing-whitespace fallback.
+        /// Enforces uniqueness unless allowMultiple is true.
+        /// </summary>
+        public static string ApplyTextBlockEdit(
+            string sourceText,
+            string target,
+            string replacement,
+            bool allowMultiple,
+            string sectionLabel,
+            out int matchCount)
+        {
+            if (string.IsNullOrEmpty(target))
+            {
+                throw new ArgumentException($"Parameter 'target' cannot be empty for {sectionLabel}.");
+            }
+
+            string lfSource = NormalizeToLf(sourceText);
+            string lfTarget = NormalizeToLf(target);
+            string lfReplacement = NormalizeToLf(replacement ?? string.Empty);
+
+            var matches = FindExactOccurrences(lfSource, lfTarget);
+            if (matches.Count > 0)
+            {
+                if (matches.Count > 1 && !allowMultiple)
+                {
+                    var lineNums = matches.Select(idx => CountLineNumber(lfSource, idx).ToString());
+                    throw new InvalidOperationException(
+                        $"Target matched {matches.Count} locations (lines {string.Join(", ", lineNums)}) in {sectionLabel}. Include more surrounding context lines or set allow_multiple=true.");
+                }
+
+                matchCount = matches.Count;
+                var sb = new StringBuilder(lfSource.Length);
+                int cursor = 0;
+                foreach (int idx in matches)
+                {
+                    sb.Append(lfSource, cursor, idx - cursor);
+                    sb.Append(lfReplacement);
+                    cursor = idx + lfTarget.Length;
+                }
+                sb.Append(lfSource, cursor, lfSource.Length - cursor);
+                return sb.ToString().Replace("\n", "\r\n");
+            }
+
+            // Fallback: line-by-line matching ignoring trailing spaces/tabs
+            string[] srcLines = lfSource.Split('\n');
+            string[] tgtLines = lfTarget.Split('\n');
+            var lineMatchStarts = new List<int>();
+            for (int i = 0; i <= srcLines.Length - tgtLines.Length; i++)
+            {
+                bool allMatch = true;
+                for (int j = 0; j < tgtLines.Length; j++)
+                {
+                    if (!string.Equals(srcLines[i + j].TrimEnd(' ', '\t'), tgtLines[j].TrimEnd(' ', '\t'), StringComparison.Ordinal))
+                    {
+                        allMatch = false;
+                        break;
+                    }
+                }
+                if (allMatch)
+                {
+                    lineMatchStarts.Add(i);
+                    i += Math.Max(0, tgtLines.Length - 1);
+                }
+            }
+
+            if (lineMatchStarts.Count == 0)
+            {
+                throw new ArgumentException($"Target block was not found in {sectionLabel}. Call read_pou first to verify exact text.");
+            }
+
+            if (lineMatchStarts.Count > 1 && !allowMultiple)
+            {
+                var lineNums = lineMatchStarts.Select(idx => (idx + 1).ToString());
+                throw new InvalidOperationException(
+                    $"Target matched {lineMatchStarts.Count} locations (lines {string.Join(", ", lineNums)}) in {sectionLabel}. Include more surrounding context lines or set allow_multiple=true.");
+            }
+
+            matchCount = lineMatchStarts.Count;
+            string[] repLines = lfReplacement.Split('\n');
+            var resultLines = new List<string>(srcLines.Length);
+            int lineCursor = 0;
+            foreach (int startLine in lineMatchStarts)
+            {
+                while (lineCursor < startLine)
+                {
+                    resultLines.Add(srcLines[lineCursor++]);
+                }
+                resultLines.AddRange(repLines);
+                lineCursor += tgtLines.Length;
+            }
+            while (lineCursor < srcLines.Length)
+            {
+                resultLines.Add(srcLines[lineCursor++]);
+            }
+
+            return string.Join("\r\n", resultLines);
+        }
+
+        public static EditPouResult EditPou(string name, List<PouEditOperation> edits)
+        {
+            if (string.IsNullOrEmpty(name))
+                throw new ArgumentException("Parameter 'name' is required.");
+            if (edits == null || edits.Count == 0)
+                throw new ArgumentException("At least one edit operation ('target'/'replacement' or 'edits') is required.");
+
+            return CodesysContext.RunOnPrimaryThread(() =>
+            {
+                var current = ReadPou(name, includeLiveEditorOverlay: true);
+                string origDecl = current.declaration ?? string.Empty;
+                string origImpl = current.implementation ?? string.Empty;
+                string newDecl = origDecl;
+                string newImpl = origImpl;
+                bool declModified = false;
+                bool implModified = false;
+                int applied = 0;
+
+                foreach (var op in edits)
+                {
+                    if (op == null) continue;
+                    string sec = (op.section ?? "implementation").Trim().ToLowerInvariant();
+                    if (sec == "declaration" || sec == "decl")
+                    {
+                        newDecl = ApplyTextBlockEdit(newDecl, op.target, op.replacement, op.allowMultiple, "declaration", out _);
+                        declModified = true;
+                        applied++;
+                    }
+                    else if (sec == "implementation" || sec == "impl")
+                    {
+                        newImpl = ApplyTextBlockEdit(newImpl, op.target, op.replacement, op.allowMultiple, "implementation", out _);
+                        implModified = true;
+                        applied++;
+                    }
+                    else
+                    {
+                        throw new ArgumentException($"Invalid section '{op.section}'. Expected 'declaration' or 'implementation'.");
+                    }
+                }
+
+                WritePou(
+                    name,
+                    declModified ? newDecl : null,
+                    implModified ? newImpl : null,
+                    current.type ?? "Program");
+
+                var diffParts = new List<string>();
+                if (declModified)
+                {
+                    string d = DiffHelper.GenerateUnifiedDiff(origDecl, newDecl, $"{name} (declaration)", $"{name} (declaration)");
+                    if (!string.IsNullOrEmpty(d)) diffParts.Add(d);
+                }
+                if (implModified)
+                {
+                    string d = DiffHelper.GenerateUnifiedDiff(origImpl, newImpl, $"{name} (implementation)", $"{name} (implementation)");
+                    if (!string.IsNullOrEmpty(d)) diffParts.Add(d);
+                }
+
+                return new EditPouResult
+                {
+                    success = true,
+                    name = name,
+                    appliedEdits = applied,
+                    declarationModified = declModified,
+                    implementationModified = implModified,
+                    diff = string.Join("\n\n", diffParts),
+                    message = $"Applied {applied} targeted edit(s) to '{name}'."
+                };
             });
         }
     }
