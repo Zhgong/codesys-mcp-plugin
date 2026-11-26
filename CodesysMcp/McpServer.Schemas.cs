@@ -36,7 +36,7 @@ namespace CodesysMcp
                 new
                 {
                     name = "get_project_info",
-                    description = "Get status and details of current active CODESYS project, including active .st mirror metadata (mirrorEnabled, mirrorDir, mirrorMode, mirrorGitEnabled).",
+                    description = "Get status and details of current active CODESYS project, host CODESYS IDE version/profile metadata (ideVersion, ideProfile, uiMode, mcpServerVersion), and active .st mirror metadata.",
                     inputSchema = new
                     {
                         type = "object",
@@ -614,7 +614,7 @@ namespace CodesysMcp
                 new
                 {
                     name = "get_ui_indicator_status",
-                    description = "Query the current visual status, color, and diagnostic details of the CODESYS IDE status bar indicator.",
+                    description = "Query the current visual status, color, host CODESYS IDE version/profile, and diagnostic details of the CODESYS IDE status bar indicator.",
                     inputSchema = new
                     {
                         type = "object",

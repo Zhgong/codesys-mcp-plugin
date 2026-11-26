@@ -146,7 +146,7 @@ namespace CodesysMcpTests
         {
             string version = CodesysIdeUiHelper.GetServerVersion();
             Assert.IsNotNull(version, "Server version should not be null");
-            Assert.AreEqual("1.5.0", version, "Version should match assembly and VERSION file (1.5.0)");
+            Assert.AreEqual("1.5.1", version, "Version should match assembly and VERSION file (1.5.1)");
         }
 
         [TestMethod]

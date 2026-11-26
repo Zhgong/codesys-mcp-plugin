@@ -127,7 +127,8 @@ namespace CodesysMcpTests
                 typeof(SessionLogSyncTests),
                 typeof(DeviceLogonCredentialTests),
                 typeof(SourceMirrorTests),
-                typeof(V150FeaturesTests)
+                typeof(V150FeaturesTests),
+                typeof(IdeVersionMatrixTests)
             };
 
             int passed = 0;

@@ -18,6 +18,15 @@ namespace CodesysMcp
         Error
     }
 
+    public class IdeEnvironmentInfo
+    {
+        public string ideVersion { get; set; }
+        public string ideProfile { get; set; }
+        public string ideExePath { get; set; }
+        public string uiMode { get; set; }
+        public string mcpServerVersion { get; set; }
+    }
+
     public class UiIndicatorInfo
     {
         public bool installed { get; set; }
@@ -34,6 +43,10 @@ namespace CodesysMcp
         public bool hostControlVisible { get; set; }
         public bool hasContextMenu { get; set; }
         public string version { get; set; }
+        public string ideVersion { get; set; }
+        public string ideProfile { get; set; }
+        public string ideExePath { get; set; }
+        public string uiMode { get; set; }
     }
 
     public class IdeScreenshotResult
@@ -296,6 +309,149 @@ namespace CodesysMcp
             return ver.Revision > 0 ? ver.ToString(4) : ver.ToString(3);
         }
 
+        public static IdeEnvironmentInfo GetIdeEnvironmentInfo(string[] cmdArgsOverride = null, string exePathOverride = null)
+        {
+            string exePath = exePathOverride;
+            if (string.IsNullOrEmpty(exePath))
+            {
+                try
+                {
+                    exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                }
+                catch { }
+            }
+
+            bool isCodesysHost = !string.IsNullOrEmpty(exePath) &&
+                Path.GetFileName(exePath).StartsWith("CODESYS", StringComparison.OrdinalIgnoreCase);
+
+            string ideVersion = null;
+            if (isCodesysHost && File.Exists(exePath))
+            {
+                try
+                {
+                    var fvi = System.Diagnostics.FileVersionInfo.GetVersionInfo(exePath);
+                    if (fvi.FileMajorPart > 0)
+                    {
+                        ideVersion = $"{fvi.FileMajorPart}.{fvi.FileMinorPart}.{fvi.FileBuildPart}.{fvi.FilePrivatePart}";
+                    }
+                    else if (!string.IsNullOrWhiteSpace(fvi.ProductVersion))
+                    {
+                        ideVersion = fvi.ProductVersion.Trim();
+                    }
+                }
+                catch { }
+            }
+
+            if (string.IsNullOrEmpty(ideVersion) && !string.IsNullOrEmpty(exePath))
+            {
+                var pathMatch = System.Text.RegularExpressions.Regex.Match(
+                    exePath,
+                    @"CODESYS\s+(\d+\.\d+\.\d+\.\d+)",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (pathMatch.Success)
+                {
+                    ideVersion = pathMatch.Groups[1].Value;
+                }
+            }
+
+            if (string.IsNullOrEmpty(ideVersion))
+            {
+                try
+                {
+                    var coreVer = typeof(_3S.CoDeSys.ScriptEngine.BasicFunctionality.ISystem).Assembly.GetName().Version;
+                    if (coreVer != null && coreVer.Major > 0)
+                    {
+                        ideVersion = coreVer.ToString(4);
+                    }
+                }
+                catch { }
+            }
+
+            if (string.IsNullOrEmpty(ideVersion))
+            {
+                ideVersion = "OfflineHost";
+            }
+
+            string[] args = cmdArgsOverride;
+            if (args == null)
+            {
+                try { args = Environment.GetCommandLineArgs(); } catch { args = new string[0]; }
+            }
+
+            string ideProfile = null;
+            bool hasNoUiFlag = false;
+            if (args != null)
+            {
+                for (int i = 0; i < args.Length; i++)
+                {
+                    string a = args[i] ?? string.Empty;
+                    if (string.Equals(a, "--noUI", StringComparison.OrdinalIgnoreCase))
+                    {
+                        hasNoUiFlag = true;
+                    }
+                    else if (a.StartsWith("--profile=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ideProfile = a.Substring("--profile=".Length).Trim().Trim('"');
+                    }
+                    else if (string.Equals(a, "--profile", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                    {
+                        ideProfile = (args[i + 1] ?? string.Empty).Trim().Trim('"');
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(ideProfile))
+            {
+                try
+                {
+                    var mainForm = FindMainCodesysForm();
+                    if (mainForm != null && !string.IsNullOrWhiteSpace(mainForm.Text))
+                    {
+                        ideProfile = mainForm.Text.Trim();
+                    }
+                }
+                catch { }
+            }
+
+            if (string.IsNullOrEmpty(ideProfile))
+            {
+                ideProfile = char.IsDigit(ideVersion[0]) ? $"CODESYS V{ideVersion}" : "Default";
+            }
+
+            string uiMode;
+            if (hasNoUiFlag)
+            {
+                uiMode = "Headless";
+            }
+            else if (CodesysContext.System != null)
+            {
+                bool uiPresent = false;
+                try
+                {
+                    uiPresent = Convert.ToBoolean(CodesysContext.System.GetType().GetProperty("ui_present")?.GetValue(CodesysContext.System, null) ?? false);
+                }
+                catch { }
+                uiMode = uiPresent ? "GUI" : "Headless";
+            }
+            else if (exePathOverride != null)
+            {
+                uiMode = "GUI";
+            }
+            else
+            {
+                uiMode = "OfflineHost";
+            }
+
+            return new IdeEnvironmentInfo
+            {
+                ideVersion = ideVersion,
+                ideProfile = ideProfile,
+                ideExePath = (isCodesysHost || exePathOverride != null) ? exePath : null,
+                uiMode = uiMode,
+                mcpServerVersion = GetServerVersion()
+            };
+        }
+
         public static string BuildMcpClientConfigJson(string pipeName = null)
         {
             string exeDir = Path.GetDirectoryName(typeof(CodesysIdeUiHelper).Assembly.Location) ?? string.Empty;
@@ -368,6 +524,7 @@ namespace CodesysMcp
         {
             bool badgeVisible = _statusBadge != null && !_statusBadge.IsDisposed && _statusBadge.Visible;
             bool hostVisible = _hostStatusStrip != null && !_hostStatusStrip.IsDisposed && _hostStatusStrip.Visible;
+            var env = GetIdeEnvironmentInfo();
 
             return new UiIndicatorInfo
             {
@@ -384,7 +541,11 @@ namespace CodesysMcp
                 isPermanentlyVisible = badgeVisible && hostVisible,
                 hostControlVisible = hostVisible,
                 hasContextMenu = _contextMenu != null && !_contextMenu.IsDisposed,
-                version = GetServerVersion()
+                version = GetServerVersion(),
+                ideVersion = env.ideVersion,
+                ideProfile = env.ideProfile,
+                ideExePath = env.ideExePath,
+                uiMode = env.uiMode
             };
         }
 

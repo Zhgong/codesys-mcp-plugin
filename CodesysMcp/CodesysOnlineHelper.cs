@@ -618,7 +618,7 @@ namespace CodesysMcp
                     int win32ThreadId = DeviceLogonWatchdog.GetCurrentThreadId();
                     CodesysContext.LogToIde($"[STEP] plc_login: Calling login({changeOptionObj}, deleteForeignApps={deleteForeignApps}) on Thread={System.Threading.Thread.CurrentThread.ManagedThreadId} (Win32={win32ThreadId}, Apartment={System.Threading.Thread.CurrentThread.GetApartmentState()})...");
 
-                    using (new DeviceLogonWatchdog(win32ThreadId, creds.Username, creds.Password))
+                    using (new DeviceLogonWatchdog(win32ThreadId, creds.Username, creds.Password, confirmGenericPrompts: true))
                     {
                         loginMethod.Invoke(onlineApp, loginArgs);
                     }
@@ -637,7 +637,7 @@ namespace CodesysMcp
                             () =>
                             {
                                 object downloadOpt = Enum.ToObject(param0Type, 0);
-                                using (new DeviceLogonWatchdog(win32ThreadId, creds.Username, creds.Password))
+                                using (new DeviceLogonWatchdog(win32ThreadId, creds.Username, creds.Password, confirmGenericPrompts: true))
                                 {
                                     loginMethod.Invoke(onlineApp, new object[] { downloadOpt, true });
                                 }
@@ -670,7 +670,7 @@ namespace CodesysMcp
                     CodesysContext.LogToIde($"[ERROR] plc_login failed: {fullErr}");
                     throw new Exception(fullErr);
                 }
-            });
+            }, 120000);
         }
 
         public static OnlineStatusResult PlcLogout()

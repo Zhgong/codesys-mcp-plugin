@@ -92,5 +92,23 @@ namespace CodesysMcpTests
             Assert.IsFalse(DeviceLogonWatchdog.IsConfirmPromptDialog("WindowsForms10.Window.8.app.0", "CODESYS"));
             Assert.IsFalse(DeviceLogonWatchdog.IsConfirmPromptDialog("#32770", "Other App"));
         }
+
+        [TestMethod]
+        public void TestWatchdogConfirmButtonCaptionMatching()
+        {
+            Assert.IsTrue(DeviceLogonWatchdog.IsConfirmButtonCaption("是(&Y)"));
+            Assert.IsTrue(DeviceLogonWatchdog.IsConfirmButtonCaption("&Yes"));
+            Assert.IsTrue(DeviceLogonWatchdog.IsConfirmButtonCaption("Yes"));
+            Assert.IsTrue(DeviceLogonWatchdog.IsConfirmButtonCaption("确定"));
+            Assert.IsTrue(DeviceLogonWatchdog.IsConfirmButtonCaption("确定(&O)"));
+            Assert.IsTrue(DeviceLogonWatchdog.IsConfirmButtonCaption("OK"));
+            Assert.IsTrue(DeviceLogonWatchdog.IsConfirmButtonCaption("&OK"));
+            Assert.IsFalse(DeviceLogonWatchdog.IsConfirmButtonCaption("否(&N)"));
+            Assert.IsFalse(DeviceLogonWatchdog.IsConfirmButtonCaption("No"));
+            Assert.IsFalse(DeviceLogonWatchdog.IsConfirmButtonCaption("Cancel"));
+            Assert.IsFalse(DeviceLogonWatchdog.IsConfirmButtonCaption("取消"));
+            Assert.IsFalse(DeviceLogonWatchdog.IsConfirmButtonCaption(""));
+            Assert.IsFalse(DeviceLogonWatchdog.IsConfirmButtonCaption(null));
+        }
     }
 }

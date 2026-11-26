@@ -41,6 +41,11 @@ namespace CodesysMcp
         public string mirrorDir { get; set; }
         public string mirrorMode { get; set; }
         public bool mirrorGitEnabled { get; set; }
+        public string ideVersion { get; set; }
+        public string ideProfile { get; set; }
+        public string ideExePath { get; set; }
+        public string uiMode { get; set; }
+        public string mcpServerVersion { get; set; }
     }
 
     public class TreeNodeResult
@@ -219,10 +224,19 @@ namespace CodesysMcp
         {
             return CodesysContext.RunOnPrimaryThread(() =>
             {
+                var env = CodesysIdeUiHelper.GetIdeEnvironmentInfo();
                 var proj = CodesysContext.PrimaryProject;
                 if (proj == null)
                 {
-                    return new ProjectInfoResult { isOpen = false };
+                    return new ProjectInfoResult
+                    {
+                        isOpen = false,
+                        ideVersion = env.ideVersion,
+                        ideProfile = env.ideProfile,
+                        ideExePath = env.ideExePath,
+                        uiMode = env.uiMode,
+                        mcpServerVersion = env.mcpServerVersion
+                    };
                 }
 
                 string path = proj.path ?? string.Empty;
@@ -248,7 +262,12 @@ namespace CodesysMcp
                     mirrorEnabled = mirrorActive,
                     mirrorDir = activeMirrorDir,
                     mirrorMode = mirrorActive ? "one-way (CODESYS -> .st)" : "disabled",
-                    mirrorGitEnabled = mirrorGit
+                    mirrorGitEnabled = mirrorGit,
+                    ideVersion = env.ideVersion,
+                    ideProfile = env.ideProfile,
+                    ideExePath = env.ideExePath,
+                    uiMode = env.uiMode,
+                    mcpServerVersion = env.mcpServerVersion
                 };
             });
         }
@@ -282,7 +301,7 @@ namespace CodesysMcp
                 }
                 CodesysIdeUiHelper.EnsureIndicatorVisible();
                 return info;
-            });
+            }, 120000);
         }
 
         public static bool CloseProject()

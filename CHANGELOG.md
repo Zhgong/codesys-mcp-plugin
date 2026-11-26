@@ -2,6 +2,20 @@
 
 All notable changes to the `codesys-mcp-plugin` (CODESYS Native C# Stdio MCP Server) project will be documented in this file.
 
+## [1.5.1] - 2026-11-26
+
+### Added
+- **Host CODESYS IDE Version Introspection (`initialize`, `get_project_info`, `get_ui_indicator_status`)**:
+  - Added `ideVersion`, `ideProfile`, `ideExePath`, `uiMode`, and `mcpServerVersion` metadata across MCP handshake and status/project inspection endpoints.
+- **Automated 48-Tool E2E Compatibility & Reliability Matrix (`tests/run_e2e_reliability_matrix.py`)**:
+  - Queries the host CODESYS IDE version/profile and verifies all 48 registered MCP tools across 8 functional categories on an isolated project copy, generating `tests/reports/e2e_reliability_matrix.md` and `tests/reports/e2e_reliability_history.json` (verified **48/48 PASS, 100%** on `CODESYS 3.5.20.50`).
+
+### Fixed
+- **Localized `#32770` Modal Confirmation (`DeviceLogonWatchdog`)**:
+  - Enumerates child `Static` and `Button` controls via `EnumChildWindows`, logs dialog captions/buttons for diagnostics, and matches localized mnemonic captions (e.g. `是(&Y)`, `确定(&O)`, `&Yes`, `IDYES=6`).
+- **Online Batch Verification & Cold-Start Timeouts (`CodesysOnlineHelper`)**:
+  - Raised `BatchVerifyMaxRetries` from `3` to `8` (400ms readback window covering a full 200ms CODESYS monitoring cycle) and increased `OpenProject` / `PlcLogin` primary-thread timeouts to `120000ms` for cold-start SoftMotion projects.
+
 ## [1.5.0] - 2026-11-24
 
 ### Added

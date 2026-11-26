@@ -1,0 +1,495 @@
+{
+  "ide_versions": {
+    "3.5.20.50": {
+      "ideVersion": "3.5.20.50",
+      "ideProfile": "CODESYS V3.5 SP20 Patch 5",
+      "uiMode": "GUI",
+      "mcpServerVersion": "1.5.0",
+      "runsCount": 1,
+      "lastRunUtc": "2026-11-26T21:37:12Z",
+      "lastDurationSec": 45.71,
+      "tools": {
+        "open_project": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 11010.5,
+          "avgLatencyMs": 11010.5,
+          "lastLatencyMs": 11010.5,
+          "lastStatus": "PASS",
+          "note": "Opened isolated ServoPress_VirtualAxis.project"
+        },
+        "close_project": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 753.0,
+          "avgLatencyMs": 753.0,
+          "lastLatencyMs": 753.0,
+          "lastStatus": "PASS",
+          "note": "Closed isolated project"
+        },
+        "get_project_info": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 2440.4,
+          "avgLatencyMs": 2440.4,
+          "lastLatencyMs": 2440.4,
+          "lastStatus": "PASS",
+          "note": "ideVersion=3.5.20.50, app=Application"
+        },
+        "get_project_tree": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 44.1,
+          "avgLatencyMs": 44.1,
+          "lastLatencyMs": 44.1,
+          "lastStatus": "PASS",
+          "note": "nodes=5"
+        },
+        "create_folder": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 48.9,
+          "avgLatencyMs": 48.9,
+          "lastLatencyMs": 48.9,
+          "lastStatus": "PASS",
+          "note": "_MatrixFolder"
+        },
+        "create_interface": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 39.0,
+          "avgLatencyMs": 39.0,
+          "lastLatencyMs": 39.0,
+          "lastStatus": "PASS",
+          "note": "ITF_MatrixProbe"
+        },
+        "create_method": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 51.4,
+          "avgLatencyMs": 51.4,
+          "lastLatencyMs": 51.4,
+          "lastStatus": "PASS",
+          "note": "FB_MatrixProbe.GetVal"
+        },
+        "create_property": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 50.8,
+          "avgLatencyMs": 50.8,
+          "lastLatencyMs": 50.8,
+          "lastStatus": "PASS",
+          "note": "FB_MatrixProbe.PropVal"
+        },
+        "save_project": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 906.6,
+          "avgLatencyMs": 906.6,
+          "lastLatencyMs": 906.6,
+          "lastStatus": "PASS",
+          "note": "Saved temp project"
+        },
+        "create_boot_application": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 731.7,
+          "avgLatencyMs": 731.7,
+          "lastLatencyMs": 731.7,
+          "lastStatus": "PASS",
+          "note": "Boot app created"
+        },
+        "read_pou": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 15.3,
+          "avgLatencyMs": 15.3,
+          "lastLatencyMs": 15.3,
+          "lastStatus": "PASS",
+          "note": "PRG_MatrixProbe"
+        },
+        "write_pou": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 111.2,
+          "avgLatencyMs": 111.2,
+          "lastLatencyMs": 111.2,
+          "lastStatus": "PASS",
+          "note": "Created Enumeration, Structure, FB & Program"
+        },
+        "edit_pou": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 50.2,
+          "avgLatencyMs": 50.2,
+          "lastLatencyMs": 50.2,
+          "lastStatus": "PASS",
+          "note": "appliedEdits=1"
+        },
+        "delete_pou": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 18.8,
+          "avgLatencyMs": 18.8,
+          "lastLatencyMs": 18.8,
+          "lastStatus": "PASS",
+          "note": "Deleted temporary POUs"
+        },
+        "search_code": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 33.5,
+          "avgLatencyMs": 33.5,
+          "lastLatencyMs": 33.5,
+          "lastStatus": "PASS",
+          "note": "matches=1"
+        },
+        "get_diff": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 10.7,
+          "avgLatencyMs": 10.7,
+          "lastLatencyMs": 10.7,
+          "lastStatus": "PASS",
+          "note": "modifiedCount=1"
+        },
+        "preview_diff": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 55.4,
+          "avgLatencyMs": 55.4,
+          "lastLatencyMs": 55.4,
+          "lastStatus": "PASS",
+          "note": "exported=1"
+        },
+        "rollback_pou": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 17.1,
+          "avgLatencyMs": 17.1,
+          "lastLatencyMs": 17.1,
+          "lastStatus": "PASS",
+          "note": "action=deleted"
+        },
+        "sync_sources_to_disk": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 407.2,
+          "avgLatencyMs": 407.2,
+          "lastLatencyMs": 407.2,
+          "lastStatus": "PASS",
+          "note": "created=69"
+        },
+        "compile_project": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 7438.3,
+          "avgLatencyMs": 7438.3,
+          "lastLatencyMs": 7438.3,
+          "lastStatus": "PASS",
+          "note": "errors=0, warnings=0"
+        },
+        "get_compiler_messages": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 667.6,
+          "avgLatencyMs": 667.6,
+          "lastLatencyMs": 667.6,
+          "lastStatus": "PASS",
+          "note": "errors=0, messages=0"
+        },
+        "get_message_categories": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 40.6,
+          "avgLatencyMs": 40.6,
+          "lastLatencyMs": 40.6,
+          "lastStatus": "PASS",
+          "note": "categories=91"
+        },
+        "get_ide_messages": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 14.9,
+          "avgLatencyMs": 14.9,
+          "lastLatencyMs": 14.9,
+          "lastStatus": "PASS",
+          "note": "count=9"
+        },
+        "get_online_status": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 2.4,
+          "avgLatencyMs": 2.4,
+          "lastLatencyMs": 2.4,
+          "lastStatus": "PASS",
+          "note": "isLoggedIn=False"
+        },
+        "plc_login": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 4875.2,
+          "avgLatencyMs": 4875.2,
+          "lastLatencyMs": 4875.2,
+          "lastStatus": "PASS",
+          "note": "state=run, autoStarted=True"
+        },
+        "inspect_online": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 10383.2,
+          "avgLatencyMs": 10383.2,
+          "lastLatencyMs": 10383.2,
+          "lastStatus": "PASS",
+          "note": "Device inspected"
+        },
+        "plc_control": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 402.4,
+          "avgLatencyMs": 402.4,
+          "lastLatencyMs": 402.4,
+          "lastStatus": "PASS",
+          "note": "stop -> start verified"
+        },
+        "plc_logout": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 251.2,
+          "avgLatencyMs": 251.2,
+          "lastLatencyMs": 251.2,
+          "lastStatus": "PASS",
+          "note": "Logged out cleanly"
+        },
+        "read_variables": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 125.8,
+          "avgLatencyMs": 125.8,
+          "lastLatencyMs": 125.8,
+          "lastStatus": "PASS",
+          "note": "Read 2 variables"
+        },
+        "write_variable": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 124.4,
+          "avgLatencyMs": 124.4,
+          "lastLatencyMs": 124.4,
+          "lastStatus": "PASS",
+          "note": "Enum E_PressProfileId.PROFILE_HARD_PIN resolved & verified"
+        },
+        "pulse_variable": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 295.4,
+          "avgLatencyMs": 295.4,
+          "lastLatencyMs": 295.4,
+          "lastStatus": "PASS",
+          "note": "pulse_ms=30, elapsed=222ms"
+        },
+        "wait_for_variable": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 10.6,
+          "avgLatencyMs": 10.6,
+          "lastLatencyMs": 10.6,
+          "lastStatus": "PASS",
+          "note": "samples=1"
+        },
+        "unforce_variables": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 64.1,
+          "avgLatencyMs": 64.1,
+          "lastLatencyMs": 64.1,
+          "lastStatus": "PASS",
+          "note": "Unforced test expression"
+        },
+        "batch_write_variables": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 124.0,
+          "avgLatencyMs": 124.0,
+          "lastLatencyMs": 124.0,
+          "lastStatus": "PASS",
+          "note": "2 vars atomic batch verified"
+        },
+        "write_struct": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 202.7,
+          "avgLatencyMs": 202.7,
+          "lastLatencyMs": 202.7,
+          "lastStatus": "PASS",
+          "note": "PressRecipe struct verified"
+        },
+        "read_struct": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 163.3,
+          "avgLatencyMs": 163.3,
+          "lastLatencyMs": 163.3,
+          "lastStatus": "PASS",
+          "note": "fields=11"
+        },
+        "read_array": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 11.8,
+          "avgLatencyMs": 11.8,
+          "lastLatencyMs": 11.8,
+          "lastStatus": "PASS",
+          "note": "items=4"
+        },
+        "get_trace_info": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 32.0,
+          "avgLatencyMs": 32.0,
+          "lastLatencyMs": 32.0,
+          "lastStatus": "PASS",
+          "note": "vars=11"
+        },
+        "add_trace_variable": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 82.2,
+          "avgLatencyMs": 82.2,
+          "lastLatencyMs": 82.2,
+          "lastStatus": "PASS",
+          "note": "MOTION_PRG.rDispPos"
+        },
+        "control_trace": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 102.0,
+          "avgLatencyMs": 102.0,
+          "lastLatencyMs": 102.0,
+          "lastStatus": "PASS",
+          "note": "action=status"
+        },
+        "analyze_trace": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 7.4,
+          "avgLatencyMs": 7.4,
+          "lastLatencyMs": 7.4,
+          "lastStatus": "PASS",
+          "note": "cycles=100"
+        },
+        "setup_plc_logger": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 677.0,
+          "avgLatencyMs": 677.0,
+          "lastLatencyMs": 677.0,
+          "lastStatus": "PASS",
+          "note": "GVL_McpLogger + FB_McpLogger ready"
+        },
+        "read_plc_logs": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 341.6,
+          "avgLatencyMs": 341.6,
+          "lastLatencyMs": 341.6,
+          "lastStatus": "PASS",
+          "note": "entries=1, cycle=2963"
+        },
+        "setup_device_logger": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 13.5,
+          "avgLatencyMs": 13.5,
+          "lastLatencyMs": 13.5,
+          "lastStatus": "PASS",
+          "note": "fcCreated=False"
+        },
+        "inject_code_log": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 56.1,
+          "avgLatencyMs": 56.1,
+          "lastLatencyMs": 56.1,
+          "lastStatus": "PASS",
+          "note": "Injected FC_LogMsg into PRG_MatrixProbe"
+        },
+        "read_device_log": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 11.3,
+          "avgLatencyMs": 11.3,
+          "lastLatencyMs": 11.3,
+          "lastStatus": "PASS",
+          "note": "XML log parse verified"
+        },
+        "get_ui_indicator_status": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 3.9,
+          "avgLatencyMs": 3.9,
+          "lastLatencyMs": 3.9,
+          "lastStatus": "PASS",
+          "note": "status=Busy, ui=GUI"
+        },
+        "capture_ide_screenshot": {
+          "passCount": 1,
+          "failCount": 0,
+          "skipCount": 0,
+          "totalLatencyMs": 177.6,
+          "avgLatencyMs": 177.6,
+          "lastLatencyMs": 177.6,
+          "lastStatus": "PASS",
+          "note": "800x395"
+        }
+      }
+    }
+  }
+}

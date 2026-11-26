@@ -204,7 +204,7 @@ CODESYS Control（如 SoftPLC `CODESYS Control Win V3 x64`）通常启用了设�
 | `open_project` | `path: string` | 打开指定的 `.project` 工程文件 |
 | `close_project` | 无 | 关闭当前打开的工程 |
 | `save_project` | 无 | 保存当前打开的工程，并自动触发 `.st` 镜像 Git 提交 |
-| `get_project_info` | 无 | 获取当前工程名称、路径、修改状态 (`isDirty`)、活动应用及 `.st` 镜像状态 (`mirrorEnabled`、`mirrorDir`、`mirrorMode`、`mirrorGitEnabled`) |
+| `get_project_info` | 无 | 获取当前工程名称、路径、修改状态 (`isDirty`)、活动应用、宿主 CODESYS IDE 版本信息 (`ideVersion`、`ideProfile`、`uiMode`) 及 `.st` 镜像状态 |
 | `get_project_tree` | `full?: bool` | 递归获取工程对象树（设备、应用、POU、GVL、任务结构） |
 | `create_folder` | `name: string`, `parent?: string` | 创建工程组织目录文件夹 |
 | `create_interface` | `name: string`, `folder?: string` | 创建 IEC 接口对象 (`ITF`) |
@@ -275,7 +275,7 @@ CODESYS Control（如 SoftPLC `CODESYS Control Win V3 x64`）通常启用了设�
 ### 8. IDE 状态栏、诊断卡与视觉验收
 | 工具名称 | 参数说明 | 功能描述 |
 | :--- | :--- | :--- |
-| `get_ui_indicator_status` | 无 | 获取 CODESYS 状态栏指示灯、心跳、请求总数与诊断卡状态 |
+| `get_ui_indicator_status` | 无 | 获取 CODESYS 状态栏指示灯、宿主 IDE 版本与配置 (`ideVersion`、`ideProfile`、`uiMode`)、心跳、请求总数与诊断卡状态 |
 | `capture_ide_screenshot` | `output_path?: string`, `max_width?: int` | 通过 Win32 `PrintWindow` 截取 CODESYS IDE 主窗口 PNG 图片用于视觉验收 |
 
 ---
@@ -301,6 +301,30 @@ powershell -ExecutionPolicy Bypass -File run_tests.ps1 -IncludeE2E
 ```powershell
 python tests/test_live_ide_editor_sync.py --launch-if-needed --close-after --run-mcp-e2e
 ```
+如需运行针对已安装 CODESYS IDE 版本的 **48 工具 E2E 兼容性与可靠性 Matrix** 并更新 [`tests/reports/e2e_reliability_matrix.md`](tests/reports/e2e_reliability_matrix.md)：
+```powershell
+python tests/run_e2e_reliability_matrix.py --launch-if-needed --close-after
+```
+
+---
+
+## 📊 E2E 版本兼容性与可靠性矩阵 (Reliability Matrix, v1.5.1)
+
+插件内置自动化版本追踪与可靠性测试引擎（[`tests/run_e2e_reliability_matrix.py`](tests/run_e2e_reliability_matrix.py)），自动获取宿主 CODESYS IDE 版本（`ideVersion` / `ideProfile`）并在隔离工程副本上逐项验证 **8 大功能模块 × 48 项 MCP 工具**。
+
+| 功能模块 | 工具数 | `3.5.20.50` (`CODESYS V3.5 SP20 Patch 5`) |
+| :--- | :---: | :---: |
+| 1. 工程管理与导航 | 10 | PASS (10/10, 100%) |
+| 2. 代码读写、搜索与镜像 | 9 | PASS (9/9, 100%) |
+| 3. 编译诊断与 IDE 消息 | 4 | PASS (4/4, 100%) |
+| 4. PLC 在线连接与控制 | 5 | PASS (5/5, 100%) |
+| 5. 变量 I/O、脉冲等待与结构体 | 9 | PASS (9/9, 100%) |
+| 6. 实时 Trace 示波器 | 4 | PASS (4/4, 100%) |
+| 7. 日志系统与诊断 | 5 | PASS (5/5, 100%) |
+| 8. IDE 状态栏与视觉截图 | 2 | PASS (2/2, 100%) |
+| **总计** | **48** | **PASS (48/48, 100% — 0 跳过, 0 失败)** |
+
+> 完整 48 项工具耗时与历史可靠性明细请见：[`tests/reports/e2e_reliability_matrix.md`](tests/reports/e2e_reliability_matrix.md)（已连接 `CODESYS Control Win V3 x64` SoftPLC 完成全部 48 项端到端在线/离线实测）。
 
 ### 运行手动 Stdio 演示脚本
 在 CODESYS 运行状态下（无论是 IDE 模式还是后台无头模式），运行自动化测试：

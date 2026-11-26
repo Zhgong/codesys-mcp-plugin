@@ -249,6 +249,7 @@ namespace CodesysMcp
 
             if (method == "initialize")
             {
+                var env = CodesysIdeUiHelper.GetIdeEnvironmentInfo();
                 return new
                 {
                     jsonrpc = "2.0",
@@ -263,7 +264,10 @@ namespace CodesysMcp
                         serverInfo = new
                         {
                             name = "codesys-native-mcp",
-                            version = CodesysIdeUiHelper.GetServerVersion()
+                            version = CodesysIdeUiHelper.GetServerVersion(),
+                            ideVersion = env.ideVersion,
+                            ideProfile = env.ideProfile,
+                            uiMode = env.uiMode
                         },
                         instructions = "Open CODESYS projects are automatically mirrored one-way (CODESYS -> .st) into <project_dir>/.cds_mcp/src with a git repository that auto-commits on every save (save_project or IDE Ctrl+S). Call get_project_info to get the exact active mirrorDir. You can read .cds_mcp/src files and use git log/git diff to track changes; always use MCP tools (write_pou, create_method, delete_pou, etc.) to modify the CODESYS project (editing .st files directly does not write back)."
                     }

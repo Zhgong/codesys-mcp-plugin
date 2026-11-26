@@ -30,7 +30,7 @@ namespace CodesysMcp
             new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         public static int BatchVerifyRetryDelayMs { get; set; } = 50;
-        public static int BatchVerifyMaxRetries { get; set; } = 3;
+        public static int BatchVerifyMaxRetries { get; set; } = 8;
 
         private static void ResetOnlineMethodCache()
         {

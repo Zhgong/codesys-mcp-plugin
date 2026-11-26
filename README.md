@@ -204,7 +204,7 @@ This plugin incorporates a **three-tier safety architecture** providing silent, 
 | `open_project` | `path: string` | Opens an existing `.project` file in CODESYS. |
 | `close_project` | None | Closes the currently active project. |
 | `save_project` | None | Saves all modifications in the current project and commits `.st` mirror changes to Git. |
-| `get_project_info` | None | Returns active project name, file path, dirty status (`isDirty`), active application, and `.st` mirror status (`mirrorEnabled`, `mirrorDir`, `mirrorMode`, `mirrorGitEnabled`). |
+| `get_project_info` | None | Returns active project name, file path, dirty status (`isDirty`), active application, host IDE metadata (`ideVersion`, `ideProfile`, `uiMode`), and `.st` mirror status. |
 | `get_project_tree` | `full?: bool` | Recursively retrieves the project tree (devices, apps, POUs, GVLs, tasks). |
 | `create_folder` | `name: string`, `parent?: string` | Creates an organizational folder within the project. |
 | `create_interface` | `name: string`, `folder?: string` | Creates a new IEC interface (`ITF`). |
@@ -275,7 +275,7 @@ This plugin incorporates a **three-tier safety architecture** providing silent, 
 ### 8. IDE UI Indicator, Diagnostics & Visual Verification
 | Tool Name | Arguments | Description |
 | :--- | :--- | :--- |
-| `get_ui_indicator_status` | None | Returns CODESYS status strip indicator status, heartbeat, total requests, and diagnostics card state. |
+| `get_ui_indicator_status` | None | Returns CODESYS status strip indicator status, host IDE version/profile (`ideVersion`, `ideProfile`, `uiMode`), heartbeat, total requests, and diagnostics card state. |
 | `capture_ide_screenshot` | `output_path?: string`, `max_width?: int` | Captures a PNG screenshot of the CODESYS IDE main window via Win32 `PrintWindow` for visual verification. |
 
 ---
@@ -301,6 +301,30 @@ To run automated background GUI keystroke + live buffer sync + full MCP E2E veri
 ```powershell
 python tests/test_live_ide_editor_sync.py --launch-if-needed --close-after --run-mcp-e2e
 ```
+To run the 48-tool **E2E Compatibility & Reliability Matrix** against the installed CODESYS IDE version and update [`tests/reports/e2e_reliability_matrix.md`](tests/reports/e2e_reliability_matrix.md):
+```powershell
+python tests/run_e2e_reliability_matrix.py --launch-if-needed --close-after
+```
+
+---
+
+## 📊 E2E Compatibility & Reliability Matrix (v1.5.1)
+
+The plugin ships with an automated version-tracking E2E matrix ([`tests/run_e2e_reliability_matrix.py`](tests/run_e2e_reliability_matrix.py)) that queries the host CODESYS IDE version (`ideVersion` / `ideProfile`) and verifies all **48 registered MCP tools** across **8 functional categories** on an isolated project copy.
+
+| Functional Category | Tools | `3.5.20.50` (`CODESYS V3.5 SP20 Patch 5`) |
+| :--- | :---: | :---: |
+| 1. Project Management & Navigation | 10 | PASS (10/10, 100%) |
+| 2. Code Editing, Search & Mirror | 9 | PASS (9/9, 100%) |
+| 3. Compilation & IDE Messages | 4 | PASS (4/4, 100%) |
+| 4. Online Connection & PLC Control | 5 | PASS (5/5, 100%) |
+| 5. Variable I/O, Primitives & Structs | 9 | PASS (9/9, 100%) |
+| 6. Real-time Trace Engine | 4 | PASS (4/4, 100%) |
+| 7. Logging & Diagnostics | 5 | PASS (5/5, 100%) |
+| 8. IDE UI Indicator & Visual | 2 | PASS (2/2, 100%) |
+| **Total** | **48** | **PASS (48/48, 100% — 0 skipped, 0 failed)** |
+
+> Full 48-tool latency & historical pass-rate report: [`tests/reports/e2e_reliability_matrix.md`](tests/reports/e2e_reliability_matrix.md) (verified end-to-end with `CODESYS Control Win V3 x64` SoftPLC online).
 
 ### Run Manual Stdio Demonstration
 While CODESYS is running (either via IDE or headless), run the automated test:
